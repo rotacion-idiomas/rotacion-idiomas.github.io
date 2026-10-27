@@ -18,6 +18,7 @@
     photoUrls: new Map(),   // foto_path -> signed URL
     email: '',
     myActivity: null,       // activity of the signed-in teacher (null = sees everyone)
+    isTeacher: false,       // accounts not in 'profesores' can't see students
   };
 
   const $ = (id) => document.getElementById(id);
@@ -98,7 +99,9 @@
         fetchAll('asistencias', 'id, estudiante_codigo, actividad_id, registrado_en, foto_path', 'id'),
         db.from('profesores').select('actividad_id').eq('email', state.email).maybeSingle(),
       ]);
+      if (mine.error) throw mine.error;
       state.activities = activities;
+      state.isTeacher = !!mine.data;
       const myId = (!mine.error && mine.data && mine.data.actividad_id) || null;
       state.myActivity = activities.find((a) => a.id === myId) || null;
 
@@ -173,8 +176,10 @@
   function renderTeacherInfo() {
     const mine = state.myActivity;
     $('teacher-info').innerHTML = mine
-      ? `<strong>${escapeHtml(mine.profesor)}</strong> · Your activity: ${escapeHtml(mine.nombre)} – ${escapeHtml(mine.salon)}`
-      : 'Your account isn\'t linked to an activity, so you can see <strong>every student</strong>.';
+      ? `<strong>${escapeHtml(mine.profesor)}</strong> · Your activity: ${escapeHtml(mine.nombre)}${mine.salon ? ` – ${escapeHtml(mine.salon)}` : ''}`
+      : state.isTeacher
+        ? 'Your account isn\'t linked to an activity, so you can see <strong>every student</strong>.'
+        : 'This account isn\'t registered as a teacher. Please create your account with the sign-up link you received.';
   }
 
   function render() {
@@ -577,7 +582,7 @@
     let y = titleBlock(doc, PAGE.top, mine ? 'Attendance report · My students' : 'Attendance report',
       mine ? mine.profesor : 'All students',
       mine
-        ? [`Your activity: ${mine.nombre}  |  ${mine.salon}`,
+        ? [`Your activity: ${mine.nombre}${mine.salon ? `  |  ${mine.salon}` : ''}`,
           `${state.students.length} ${state.students.length === 1 ? 'student' : 'students'} chose you as their teacher`]
         : [`${state.activities.length} activities  |  ${state.students.length} students registered`]);
     y = statBoxes(doc, y, summary());

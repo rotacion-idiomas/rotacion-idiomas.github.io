@@ -87,7 +87,7 @@
     const tag = $('activity-tag');
     tag.hidden = !activity;
     if (activity) {
-      tag.innerHTML = `${escapeHtml(activity.nombre)} <small>· ${escapeHtml(activity.salon)}</small>`;
+      tag.innerHTML = `${escapeHtml(activity.nombre)}${activity.salon ? ` <small>· ${escapeHtml(activity.salon)}</small>` : ''}`;
       history.replaceState(null, '', `?activity=${encodeURIComponent(activity.id)}`);
     }
   }
@@ -109,7 +109,7 @@
       const current = state.activity && state.activity.id === a.id;
       const meta = record
         ? `Done · ${formatTime(record.registrado_en)}`
-        : `${escapeHtml(a.salon)} · Pending`;
+        : `${a.salon ? `${escapeHtml(a.salon)} · ` : ''}Pending`;
       return `<li class="${current ? 'is-current' : ''}">
         <span class="dot ${record ? 'is-done' : ''}" aria-hidden="true">${record ? '✓' : ''}</span>
         <span><span class="name">${escapeHtml(a.nombre)}</span><br><span class="meta">${meta}</span></span>
@@ -542,7 +542,7 @@
     }
 
     $('scanner').classList.add('is-found');
-    scannerMessage(`Found: ${activity.nombre} · ${activity.salon}`);
+    scannerMessage(`Found: ${activity.nombre}${activity.salon ? ` · ${activity.salon}` : ''}`);
     if (navigator.vibrate) navigator.vibrate(80);
     setTimeout(() => {
       closeScanner();

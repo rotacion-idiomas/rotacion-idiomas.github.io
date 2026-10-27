@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#09843B">
+  <meta name="robots" content="noindex">
+  <title>Activity Rotation – Teacher sign-up</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%2309843B'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' stroke='white' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <img class="logo" src="unisimon-logo-50-year.png" alt="Universidad Simón Bolívar">
+  </header>
+
+  <main class="container">
+    <h1 class="event-title" data-event-title>Activity Rotation</h1>
+
+    <!-- Loading -->
+    <section class="screen" id="s-loading">
+      <div class="loading"><div class="spinner spinner-dark"></div><span>Loading…</span></div>
+    </section>
+
+    <!-- Link without a valid invitation -->
+    <section class="screen" id="s-invalid" hidden>
+      <div class="alert alert-error" role="alert">
+        <span class="alert-icon">!</span>
+        <div>
+          <strong>This link isn't valid</strong>
+          <span id="invalid-text">Please use the full sign-up link you received, or ask the event coordinator for a new one.</span>
+        </div>
+      </div>
+      <button class="btn btn-secondary" id="invalid-retry" type="button" hidden>Try again</button>
+    </section>
+
+    <!-- Sign-up form -->
+    <section class="screen" id="s-form" hidden>
+      <div>
+        <h2>Create your teacher account</h2>
+        <p class="lead" style="margin-top:6px">Your name and activity will appear on your classroom's QR code and in the students' list of teachers.</p>
+      </div>
+
+      <div class="alert alert-error" id="form-error" role="alert" hidden>
+        <span class="alert-icon">!</span><div id="form-error-text"></div>
+      </div>
+
+      <form id="signup-form" novalidate>
+        <div class="field">
+          <label for="t-name">Full name</label>
+          <input class="input" id="t-name" autocomplete="name" autocapitalize="words" required maxlength="100">
+        </div>
+        <div class="field">
+          <label for="t-email">Email</label>
+          <input class="input" id="t-email" type="email" autocomplete="email" autocapitalize="off" required>
+          <span class="hint">You'll use it to sign in to your dashboard.</span>
+        </div>
+        <div class="field">
+          <label for="t-activity">Name of your activity</label>
+          <input class="input" id="t-activity" autocomplete="off" required maxlength="60" placeholder="e.g. Creative Writing">
+        </div>
+        <div class="field">
+          <label for="t-room">Classroom <span class="muted" style="font-weight:normal">(optional)</span></label>
+          <input class="input" id="t-room" autocomplete="off" maxlength="40" placeholder="e.g. Room 305">
+        </div>
+        <div class="field">
+          <label for="t-password">Password</label>
+          <input class="input" id="t-password" type="password" autocomplete="new-password" required minlength="8">
+          <span class="hint">At least 8 characters.</span>
+        </div>
+        <div class="field">
+          <label for="t-password2">Repeat password</label>
+          <input class="input" id="t-password2" type="password" autocomplete="new-password" required minlength="8">
+        </div>
+        <button class="btn" type="submit">Create account</button>
+      </form>
+      <p class="center muted">Already have an account? <a href="teachers.html">Sign in</a></p>
+    </section>
+
+    <!-- Done -->
+    <section class="screen" id="s-done" hidden>
+      <div class="card center">
+        <div class="big-check" aria-hidden="true">✓</div>
+        <h2 style="margin-top:14px">Your account is ready!</h2>
+        <p class="lead" style="margin-top:6px" id="done-text"></p>
+      </div>
+      <a class="btn" href="teachers.html">Go to my dashboard</a>
+      <a class="btn btn-secondary" id="done-qr" href="qr.html">🖨 Print my QR code</a>
+    </section>
+  </main>
+
+  <footer class="site-footer" data-footer></footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script src="common.js"></script>
+  <script src="teacher-signup.js"></script>
+</body>
+</html>

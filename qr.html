@@ -63,7 +63,7 @@
       <h1 class="dash-title">QR codes</h1>
       <p>One page per activity. Print them and post each one at the door of its classroom.</p>
     </div>
-    <button class="btn btn-small" type="button" onclick="window.print()">🖨 Print all</button>
+    <button class="btn btn-small" type="button" id="btn-print" onclick="window.print()">🖨 Print all</button>
   </div>
 
   <div class="loading" id="qr-loading"><div class="spinner spinner-dark"></div><span>Loading…</span></div>
@@ -92,8 +92,13 @@
         return;
       }
 
+      // ?activity=id prints only that activity's sheet.
+      const only = new URLSearchParams(location.search).get('activity');
+      const list = only ? data.filter((a) => a.id === only) : data;
+      if (only && list.length) document.getElementById('btn-print').textContent = '🖨 Print';
+
       const sheets = document.getElementById('sheets');
-      data.forEach((a) => {
+      list.forEach((a) => {
         const url = `${cfg.SITE_URL}?activity=${encodeURIComponent(a.id)}`;
         const sheet = document.createElement('section');
         sheet.className = 'sheet';
