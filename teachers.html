@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#09843B">
+  <meta name="robots" content="noindex">
+  <title>Language Rotation – Teachers</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%2309843B'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' stroke='white' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="dash-header">
+    <img class="logo" src="unisimon-logo-50-year.png" alt="Universidad Simón Bolívar">
+    <div class="dash-user" id="user-box" hidden>
+      <span id="user-email"></span>
+      <button class="btn btn-secondary btn-small" id="btn-logout" type="button">Sign out</button>
+    </div>
+  </header>
+
+  <!-- Loading -->
+  <div class="loading" id="v-loading"><div class="spinner spinner-dark"></div><span>Loading…</span></div>
+
+  <!-- Login -->
+  <main class="login" id="v-login" hidden>
+    <h1 class="event-title"><span data-event-title>Language Rotation</span></h1>
+    <p class="lead center" style="margin-top:6px">Teacher dashboard</p>
+    <form id="login-form" class="card" style="margin-top:24px" novalidate>
+      <div class="alert alert-error" id="login-error" role="alert" hidden>
+        <span class="alert-icon">!</span><div id="login-error-text"></div>
+      </div>
+      <div class="field">
+        <label for="l-email">Email</label>
+        <input class="input" id="l-email" type="email" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="l-password">Password</label>
+        <input class="input" id="l-password" type="password" autocomplete="current-password" required>
+      </div>
+      <button class="btn" type="submit">Sign in</button>
+    </form>
+  </main>
+
+  <!-- Dashboard -->
+  <main class="dash" id="v-dash" hidden>
+    <h1 class="dash-title"><span data-event-title>Language Rotation</span> · Attendance</h1>
+    <p class="dash-sub" id="last-update"></p>
+
+    <div class="alert alert-error" id="dash-error" role="alert" style="margin-top:16px" hidden>
+      <span class="alert-icon">!</span><div id="dash-error-text"></div>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="toolbar">
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" type="button" id="tab-activity" aria-selected="true">By activity</button>
+        <button class="tab" role="tab" type="button" id="tab-overview" aria-selected="false">Overview</button>
+      </div>
+      <div class="toolbar-actions">
+        <button class="btn btn-secondary btn-small" id="btn-refresh" type="button">↻ Refresh</button>
+        <button class="btn btn-small" id="btn-download" type="button">⬇ Download Excel</button>
+      </div>
+    </div>
+
+    <!-- By activity -->
+    <section id="p-activity">
+      <div class="filters">
+        <div class="field">
+          <label for="sel-activity">Activity</label>
+          <select class="select" id="sel-activity"></select>
+        </div>
+        <div class="field">
+          <label for="search-activity">Search student</label>
+          <input class="input" id="search-activity" type="search" placeholder="Name or student ID">
+        </div>
+      </div>
+      <p class="activity-info" id="activity-info"></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Photo</th><th>Student</th><th>Student ID</th><th>Course / Group</th><th>Date</th><th>Time</th></tr></thead>
+          <tbody id="activity-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Overview -->
+    <section id="p-overview" hidden>
+      <div class="filters">
+        <div class="field">
+          <label for="search-overview">Search student</label>
+          <input class="input" id="search-overview" type="search" placeholder="Name or student ID">
+        </div>
+        <label class="check"><input type="checkbox" id="only-incomplete"> Show only students who haven't finished</label>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead id="overview-head"></thead>
+          <tbody id="overview-rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer" data-footer></footer>
+
+  <!-- Photo viewer -->
+  <div class="lightbox" id="lightbox" hidden>
+    <button class="close" id="lightbox-close" type="button" aria-label="Close">×</button>
+    <figure>
+      <img id="lightbox-img" alt="">
+      <figcaption id="lightbox-caption"></figcaption>
+    </figure>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script src="common.js"></script>
+  <script src="teachers.js"></script>
+</body>
+</html>

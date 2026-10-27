@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Language Rotation – QR codes</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%2309843B'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' stroke='white' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body { background: var(--bg-alt); }
+    .qr-toolbar {
+      max-width: 820px; margin: 0 auto; padding: 24px 16px 0;
+      display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+    }
+    .qr-toolbar p { color: var(--text-2); font-size: 15px; max-width: 520px; }
+    .sheets { display: grid; gap: 24px; padding: 24px 16px 40px; justify-items: center; }
+    .sheet {
+      width: 100%; max-width: 680px; aspect-ratio: 8.5 / 11;
+      background: #fff;
+      box-shadow: 0 2px 10px rgba(0,0,0,.12);
+      border-top: 14px solid var(--green);
+      border-bottom: 14px solid var(--green);
+      display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+      padding: clamp(20px, 5vw, 40px) clamp(20px, 6vw, 48px);
+      text-align: center;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
+    .sheet > * { flex-shrink: 0; }
+    .sheet .logo { width: 62%; min-width: 0; }
+    .sheet .event { font-family: var(--serif); font-weight: bold; font-size: clamp(20px, 4vw, 30px); margin-top: 3%; }
+    .sheet .qr { width: 62%; aspect-ratio: 1; margin: 3% 0; }
+    .sheet .qr img, .sheet .qr canvas { width: 100% !important; height: auto !important; display: block; image-rendering: pixelated; }
+    .sheet .name { font-family: var(--serif); font-weight: bold; font-size: clamp(32px, 8vw, 58px); line-height: 1.05; }
+    .sheet .room { font-size: clamp(20px, 4.4vw, 32px); font-weight: bold; color: var(--green); margin-top: 1%; }
+    .sheet .teacher { font-size: clamp(14px, 2.6vw, 19px); color: var(--text-2); margin-top: 1%; }
+    .sheet .scan { font-size: clamp(13px, 2.4vw, 17px); margin-top: 3%; }
+    .sheet .url { font-size: clamp(10px, 1.8vw, 13px); color: var(--text-2); word-break: break-all; margin-top: 1%; }
+
+    @page { size: letter portrait; margin: 0; }
+    @media print {
+      body { background: #fff; }
+      .qr-toolbar, .site-footer { display: none !important; }
+      .sheets { padding: 0; gap: 0; display: block; }
+      .sheet {
+        max-width: none; width: 8.5in; height: 11in; aspect-ratio: auto;
+        box-shadow: none; padding: 0.6in 0.7in;
+        break-after: page; page-break-after: always;
+      }
+      .sheet:last-child { break-after: auto; page-break-after: auto; }
+      .sheet .event { font-size: 30px; }
+      .sheet .name { font-size: 64px; }
+      .sheet .room { font-size: 34px; }
+      .sheet .teacher { font-size: 20px; }
+      .sheet .scan { font-size: 18px; }
+      .sheet .url { font-size: 13px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="qr-toolbar">
+    <div>
+      <h1 class="dash-title">QR codes</h1>
+      <p>One page per activity. Print them and post each one at the door of its classroom.</p>
+    </div>
+    <button class="btn btn-small" type="button" onclick="window.print()">🖨 Print all</button>
+  </div>
+
+  <div class="loading" id="qr-loading"><div class="spinner spinner-dark"></div><span>Loading…</span></div>
+  <div class="container" id="qr-error" hidden>
+    <div class="alert alert-error" role="alert"><span class="alert-icon">!</span><div id="qr-error-text"></div></div>
+  </div>
+  <div class="sheets" id="sheets"></div>
+
+  <footer class="site-footer" data-footer></footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script src="common.js"></script>
+  <script>
+    (async function () {
+      const { createDb, escapeHtml, friendlyError, fillBranding, cfg } = window.App;
+      fillBranding();
+      const db = createDb({ auth: { persistSession: false, autoRefreshToken: false } });
+      const { data, error } = await db.from('actividades').select('id, nombre, salon, profesor').order('orden');
+      document.getElementById('qr-loading').hidden = true;
+
+      if (error) {
+        document.getElementById('qr-error').hidden = false;
+        document.getElementById('qr-error-text').textContent = friendlyError(error);
+        return;
+      }
+
+      const sheets = document.getElementById('sheets');
+      data.forEach((a) => {
+        const url = `${cfg.SITE_URL}?activity=${encodeURIComponent(a.id)}`;
+        const sheet = document.createElement('section');
+        sheet.className = 'sheet';
+        sheet.innerHTML = `
+          <img class="logo" src="unisimon-logo-50-year.png" alt="Universidad Simón Bolívar">
+          <div class="event">${escapeHtml(cfg.EVENT_TITLE)}</div>
+          <div class="qr"></div>
+          <div>
+            <div class="name">${escapeHtml(a.nombre)}</div>
+            <div class="room">${escapeHtml(a.salon)}</div>
+            <div class="teacher">Teacher: ${escapeHtml(a.profesor)}</div>
+            <div class="scan">Scan with your phone's camera to check in</div>
+            <div class="url">${escapeHtml(url)}</div>
+          </div>`;
+        sheets.appendChild(sheet);
+        new QRCode(sheet.querySelector('.qr'), {
+          text: url, width: 600, height: 600,
+          colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M,
+        });
+      });
+    })();
+  </script>
+</body>
+</html>
