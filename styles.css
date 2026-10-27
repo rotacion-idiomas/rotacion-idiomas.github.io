@@ -425,6 +425,25 @@ tr.is-incomplete td:first-child { box-shadow: inset 4px 0 0 var(--gold); }
 .badge-done { background: var(--green-soft); color: var(--green-dark); }
 .badge-pending { background: var(--gold-soft); color: #7A5D00; }
 
+.invites { margin-top: 48px; display: grid; gap: 16px; }
+.section-title { font-family: var(--serif); font-size: 24px; }
+.invite-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.invite-form .field { flex: 1 1 260px; }
+.invite-form .btn { min-height: 52px; }
+.invite-list { display: grid; gap: 10px; }
+.invite {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: grid;
+  gap: 8px;
+  background: #fff;
+}
+.invite.is-new { border-color: var(--green); background: var(--green-soft); }
+.invite-head { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.invite-link { font-size: 13px; color: var(--text-2); word-break: break-all; }
+.invite-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
 .empty { padding: 40px 16px; text-align: center; color: var(--text-2); }
 
 .login { max-width: 400px; margin: 48px auto; padding: 0 16px; width: 100%; }

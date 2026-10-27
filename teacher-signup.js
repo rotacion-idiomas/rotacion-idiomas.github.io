@@ -29,19 +29,30 @@
     }
   }
 
-  function showInvalid(message, canRetry) {
-    if (message) $('invalid-text').textContent = message;
+  const INVALID_TEXT = 'Please use the full sign-up link you received, or ask the event coordinator for a new one.';
+  const USED_TEXT = 'Each invitation link works only once, and this one has already been used. '
+    + 'If you created your account with it, sign in to your dashboard. Otherwise, ask the event coordinator for a new link.';
+
+  function showInvalid(message, canRetry, title) {
+    $('invalid-title').textContent = title || "This link isn't valid";
+    $('invalid-text').textContent = message || INVALID_TEXT;
     $('invalid-retry').hidden = !canRetry;
+    $('invalid-signin').hidden = message !== USED_TEXT;
     show('invalid');
+  }
+
+  function showUsed() {
+    showInvalid(USED_TEXT, false, 'This link was already used');
   }
 
   async function init() {
     fillBranding();
     show('loading');
     if (!code) return showInvalid();
-    const { data, error } = await db.rpc('invitacion_valida', { p_codigo: code });
-    if (error) return showInvalid(friendlyError(error), true);
-    if (!data) return showInvalid();
+    const { data, error } = await db.rpc('estado_invitacion', { p_codigo: code });
+    if (error) return showInvalid(friendlyError(error), true, 'Something went wrong');
+    if (data === 'used') return showUsed();
+    if (data !== 'ok') return showInvalid();
     show('form');
   }
   $('invalid-retry').addEventListener('click', init);
@@ -106,6 +117,7 @@
       });
       if (error) {
         if ((error.message || '').includes('invalid_code')) return showInvalid();
+        if ((error.message || '').includes('used_code')) return showUsed();
         return setAlert('form-error', messageFor(error));
       }
 

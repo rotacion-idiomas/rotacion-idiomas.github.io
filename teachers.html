@@ -73,6 +73,25 @@
         <tbody id="students-rows"></tbody>
       </table>
     </div>
+
+    <!-- Coordinator only: single-use sign-up links for teachers -->
+    <section class="invites" id="invites" hidden>
+      <div>
+        <h2 class="section-title">Invite teachers</h2>
+        <p class="muted">Send each teacher their own link. It works only once: after the teacher creates their account, the link stops working.</p>
+      </div>
+      <form class="invite-form" id="invite-form" novalidate>
+        <div class="field">
+          <label for="invite-note">Who is it for? <span class="muted" style="font-weight:normal">(optional)</span></label>
+          <input class="input" id="invite-note" maxlength="80" placeholder="e.g. Laura Martínez">
+        </div>
+        <button class="btn btn-small" type="submit">＋ New invitation link</button>
+      </form>
+      <div class="alert alert-error" id="invite-error" role="alert" hidden>
+        <span class="alert-icon">!</span><div id="invite-error-text"></div>
+      </div>
+      <div class="invite-list" id="invite-rows"></div>
+    </section>
   </main>
 
   <footer class="site-footer" data-footer></footer>

@@ -19,6 +19,9 @@
     email: '',
     myActivity: null,       // activity of the signed-in teacher (null = sees everyone)
     isTeacher: false,       // accounts not in 'profesores' can't see students
+    isAdmin: false,         // the coordinator creates the teachers' invitation links
+    invites: [],
+    newInvite: null,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -97,11 +100,12 @@
         fetchAll('actividades', 'id, nombre, salon, profesor, orden', 'orden'),
         fetchAll('estudiantes', 'codigo, nombre, profesor_actividad, creado_en', 'codigo'),
         fetchAll('asistencias', 'id, estudiante_codigo, actividad_id, registrado_en, foto_path', 'id'),
-        db.from('profesores').select('actividad_id').eq('email', state.email).maybeSingle(),
+        db.from('profesores').select('actividad_id, es_admin').eq('email', state.email).maybeSingle(),
       ]);
       if (mine.error) throw mine.error;
       state.activities = activities;
       state.isTeacher = !!mine.data;
+      state.isAdmin = !!(mine.data && mine.data.es_admin);
       const myId = (!mine.error && mine.data && mine.data.actividad_id) || null;
       state.myActivity = activities.find((a) => a.id === myId) || null;
 
@@ -116,6 +120,8 @@
       setAlert('dash-error', '');
       $('last-update').textContent = `Last updated: ${formatDate(new Date())}, ${formatTime(new Date())}`;
       renderTeacherInfo();
+      $('invites').hidden = !state.isAdmin;
+      if (state.isAdmin) loadInvites();
       render();
     } catch (err) {
       console.error(err);
@@ -268,6 +274,96 @@
       data.forEach((d) => { if (d.signedUrl) state.photoUrls.set(d.path, d.signedUrl); });
     }
   }
+
+  // ---------------------------------------------------------------- invitations (coordinator)
+  function inviteLink(code) {
+    return `${cfg.SITE_URL}teacher-signup.html?code=${encodeURIComponent(code)}`;
+  }
+
+  async function loadInvites() {
+    const { data, error } = await db.from('invitaciones').select('*').order('creada_en', { ascending: false });
+    if (error) return setAlert('invite-error', friendlyError(error));
+    state.invites = data;
+    renderInvites();
+  }
+
+  function renderInvites() {
+    const tbody = $('invite-rows');
+    if (!state.invites.length) {
+      tbody.innerHTML = '<p class="empty">No invitation links yet.</p>';
+      return;
+    }
+    tbody.innerHTML = state.invites.map((inv) => {
+      const link = inviteLink(inv.codigo);
+      const used = !!inv.usada_en;
+      const message = `Hi! Create your teacher account for the ${cfg.EVENT_TITLE} here (this link works only once): ${link}`;
+      return `<div class="invite ${inv.codigo === state.newInvite ? 'is-new' : ''}">
+        <div class="invite-head">
+          <strong>${inv.nota ? escapeHtml(inv.nota) : '<span class="muted">No name</span>'}</strong>
+          ${used ? '<span class="badge badge-done">Used</span>' : '<span class="badge badge-pending">Waiting</span>'}
+        </div>
+        ${used
+          ? `<span class="muted" style="font-size:14px">Account created by ${escapeHtml(inv.usada_por)} · ${formatDate(inv.usada_en)}, ${formatTime(inv.usada_en)}</span>`
+          : `<span class="invite-link">${escapeHtml(link)}</span>
+            <div class="invite-actions">
+              <button class="btn btn-small" type="button" data-copy="${escapeHtml(link)}">Copy link</button>
+              <a class="btn btn-secondary btn-small" href="https://wa.me/?text=${encodeURIComponent(message)}" target="_blank" rel="noopener">Send by WhatsApp</a>
+              <button class="btn btn-secondary btn-small" type="button" data-cancel="${escapeHtml(inv.codigo)}">Cancel</button>
+            </div>`}
+      </div>`;
+    }).join('');
+  }
+
+  $('invite-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const button = e.target.querySelector('button');
+    button.disabled = true;
+    const { data, error } = await db.rpc('crear_invitacion', { p_nota: $('invite-note').value });
+    button.disabled = false;
+    if (error) return setAlert('invite-error', friendlyError(error));
+    setAlert('invite-error', '');
+    $('invite-note').value = '';
+    state.newInvite = data.codigo;
+    state.invites.unshift(data);
+    renderInvites();
+  });
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const input = document.createElement('textarea');
+      input.value = text;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      input.remove();
+    }
+  }
+
+  $('invite-rows').addEventListener('click', async (e) => {
+    const copy = e.target.closest('[data-copy]');
+    if (copy) {
+      await copyText(copy.dataset.copy);
+      copy.textContent = 'Copied ✓';
+      setTimeout(() => { copy.textContent = 'Copy link'; }, 2000);
+      return;
+    }
+    // Cancel needs a second tap, so a link already sent isn't cancelled by mistake.
+    const cancel = e.target.closest('[data-cancel]');
+    if (!cancel) return;
+    if (!cancel.dataset.armed) {
+      cancel.dataset.armed = '1';
+      cancel.textContent = 'Tap again to cancel';
+      setTimeout(() => { delete cancel.dataset.armed; cancel.textContent = 'Cancel'; }, 3000);
+      return;
+    }
+    cancel.disabled = true;
+    const { error } = await db.rpc('anular_invitacion', { p_codigo: cancel.dataset.cancel });
+    if (error) return setAlert('invite-error', friendlyError(error));
+    state.invites = state.invites.filter((inv) => inv.codigo !== cancel.dataset.cancel);
+    renderInvites();
+  });
 
   // ---------------------------------------------------------------- lightbox
   $('students-rows').addEventListener('click', async (e) => {
