@@ -153,7 +153,17 @@
   async function goToMain() {
     show('loading');
     try {
-      state.done = await fetchProgress(state.student.codigo);
+      const [found, done] = await Promise.all([
+        db.rpc('buscar_estudiante', { p_codigo: state.student.codigo }),
+        fetchProgress(state.student.codigo),
+      ]);
+      if (found.error) throw found.error;
+      // The registration saved on this phone no longer exists (e.g. data was reset).
+      if (!found.data) {
+        forgetStudent();
+        return showRegister();
+      }
+      state.done = done;
     } catch (err) {
       return showError(err, goToMain);
     }
