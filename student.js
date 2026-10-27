@@ -12,10 +12,10 @@
   const state = {
     activities: [],
     activity: null,   // activity being checked in, or null
-    student: null,    // { codigo, nombre, grado }
+    student: null,    // { codigo, nombre, profesor_actividad, profesor }
     done: [],         // [{ actividad_id, registrado_en }]
     photo: null,      // compressed Blob
-    draft: null,      // { nombre, grado } waiting for "Is this you?"
+    draft: null,      // { nombre, profesor } waiting for "Is this you?"
   };
 
   const $ = (id) => document.getElementById(id);
@@ -69,7 +69,10 @@
   }
 
   function rememberStudent(student) {
-    state.student = { codigo: student.codigo, nombre: student.nombre, grado: student.grado };
+    state.student = {
+      codigo: student.codigo, nombre: student.nombre,
+      profesor_actividad: student.profesor_actividad, profesor: student.profesor,
+    };
     storageSet(STUDENT_KEY, state.student);
   }
 
@@ -186,14 +189,25 @@
 
   // ---------------------------------------------------------------- register
   function showRegister(message) {
+    fillTeacherSelect();
     setAlert('register-error', message || '');
     show('register');
   }
 
-  async function register(nombre, grado, confirmed, button) {
+  // Teachers come from the activities (each activity has its teacher).
+  function fillTeacherSelect() {
+    const select = $('f-teacher');
+    const current = select.value;
+    const teachers = [...state.activities].sort((a, b) => a.profesor.localeCompare(b.profesor, 'es'));
+    select.innerHTML = '<option value="">Choose your teacher…</option>' + teachers.map((a) =>
+      `<option value="${escapeHtml(a.id)}">${escapeHtml(a.profesor)}</option>`).join('');
+    select.value = current;
+  }
+
+  async function register(nombre, profesor, confirmed, button) {
     setBusy(button, true, 'Saving…');
     const { data, error } = await db.rpc('registrar_estudiante_nuevo', {
-      p_nombre: nombre, p_grado: grado, p_confirmado: confirmed,
+      p_nombre: nombre, p_profesor: profesor, p_confirmado: confirmed,
     });
     setBusy(button, false);
 
@@ -202,7 +216,7 @@
       return show('register');
     }
     if (data.status === 'possible_match') {
-      state.draft = { nombre, grado };
+      state.draft = { nombre, profesor };
       return showMatches(data.matches);
     }
     state.draft = null;
@@ -213,18 +227,18 @@
   $('form-new').addEventListener('submit', (e) => {
     e.preventDefault();
     const nombre = $('f-name').value.trim().replace(/\s+/g, ' ');
-    const grado = $('f-grade').value.trim();
+    const profesor = $('f-teacher').value;
 
     if (nombre.length < 3 || !nombre.includes(' ')) return setAlert('register-error', 'Please write your full name (first and last name).');
-    if (!grado) return setAlert('register-error', 'Please write your course or group.');
+    if (!profesor) return setAlert('register-error', 'Please choose your teacher.');
     setAlert('register-error', '');
-    register(nombre, grado, false, e.submitter || e.target.querySelector('button'));
+    register(nombre, profesor, false, e.submitter || e.target.querySelector('button'));
   });
 
   function showMatches(matches) {
     $('confirm-list').innerHTML = matches.map((m, i) => `
       <button class="match-btn" type="button" data-index="${i}">
-        <span><strong>${escapeHtml(m.nombre)}</strong><br><span class="muted">${escapeHtml(m.grado)}</span></span>
+        <span><strong>${escapeHtml(m.nombre)}</strong><br><span class="muted">${m.profesor ? `Teacher: ${escapeHtml(m.profesor)}` : ''}</span></span>
         <span class="arrow" aria-hidden="true">›</span>
       </button>`).join('');
     $('confirm-list').querySelectorAll('.match-btn').forEach((button) => {
@@ -239,7 +253,7 @@
 
   $('confirm-no').addEventListener('click', (e) => {
     if (!state.draft) return showRegister();
-    register(state.draft.nombre, state.draft.grado, true, e.currentTarget);
+    register(state.draft.nombre, state.draft.profesor, true, e.currentTarget);
   });
 
   $('switch-student').addEventListener('click', () => {

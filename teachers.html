@@ -43,7 +43,8 @@
 
   <!-- Dashboard -->
   <main class="dash" id="v-dash" hidden>
-    <h1 class="dash-title"><span data-event-title>Activity Rotation</span> · Attendance</h1>
+    <h1 class="dash-title"><span data-event-title>Activity Rotation</span> · My students</h1>
+    <p class="activity-info" id="teacher-info" style="margin:6px 0 0"></p>
     <p class="dash-sub" id="last-update"></p>
 
     <div class="alert alert-error" id="dash-error" role="alert" style="margin-top:16px" hidden>
@@ -53,9 +54,12 @@
     <div class="stats" id="stats"></div>
 
     <div class="toolbar">
-      <div class="tabs" role="tablist">
-        <button class="tab" role="tab" type="button" id="tab-activity" aria-selected="true">By activity</button>
-        <button class="tab" role="tab" type="button" id="tab-overview" aria-selected="false">Overview</button>
+      <div class="filters">
+        <div class="field">
+          <label for="search">Search student</label>
+          <input class="input" id="search" type="search" placeholder="Name or student ID">
+        </div>
+        <label class="check"><input type="checkbox" id="only-incomplete"> Show only students who haven't finished</label>
       </div>
       <div class="toolbar-actions">
         <button class="btn btn-secondary btn-small" id="btn-refresh" type="button">↻ Refresh</button>
@@ -63,43 +67,12 @@
       </div>
     </div>
 
-    <!-- By activity -->
-    <section id="p-activity">
-      <div class="filters">
-        <div class="field">
-          <label for="sel-activity">Activity</label>
-          <select class="select" id="sel-activity"></select>
-        </div>
-        <div class="field">
-          <label for="search-activity">Search student</label>
-          <input class="input" id="search-activity" type="search" placeholder="Name or student ID">
-        </div>
-      </div>
-      <p class="activity-info" id="activity-info"></p>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Photo</th><th>Student</th><th>Student ID</th><th>Course / Group</th><th>Date</th><th>Time</th></tr></thead>
-          <tbody id="activity-rows"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- Overview -->
-    <section id="p-overview" hidden>
-      <div class="filters">
-        <div class="field">
-          <label for="search-overview">Search student</label>
-          <input class="input" id="search-overview" type="search" placeholder="Name or student ID">
-        </div>
-        <label class="check"><input type="checkbox" id="only-incomplete"> Show only students who haven't finished</label>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead id="overview-head"></thead>
-          <tbody id="overview-rows"></tbody>
-        </table>
-      </div>
-    </section>
+    <div class="table-wrap">
+      <table>
+        <thead id="students-head"></thead>
+        <tbody id="students-rows"></tbody>
+      </table>
+    </div>
   </main>
 
   <footer class="site-footer" data-footer></footer>
@@ -108,26 +81,9 @@
   <div class="modal" id="pdf-modal" role="dialog" aria-modal="true" aria-labelledby="pdf-title" hidden>
     <form class="modal-card" id="pdf-form">
       <h2 id="pdf-title">Download PDF report</h2>
-      <p class="muted" style="margin-top:-6px">Choose what to include in the report.</p>
+      <p class="muted" style="margin-top:-6px" id="pdf-desc"></p>
 
-      <label class="option">
-        <input type="radio" name="pdf-scope" value="activity" checked>
-        <span class="option-body">
-          <strong id="pdf-activity-label">One activity</strong><br>
-          <span class="muted">Students who attended, with date, time and photo, plus who is still missing.</span>
-          <select class="select" id="pdf-activity" aria-label="Activity"></select>
-        </span>
-      </label>
-
-      <label class="option">
-        <input type="radio" name="pdf-scope" value="all">
-        <span class="option-body">
-          <strong>Full report – all activities</strong><br>
-          <span class="muted">Summary, every student's progress, and the attendance list of each activity.</span>
-        </span>
-      </label>
-
-      <label class="check" style="min-height:auto"><input type="checkbox" id="pdf-photos" checked> Include photo thumbnails</label>
+      <label class="check" style="min-height:auto" id="pdf-photos-label"><input type="checkbox" id="pdf-photos" checked> <span id="pdf-photos-text">Include photo thumbnails</span></label>
 
       <div class="alert alert-error" id="pdf-error" role="alert" hidden>
         <span class="alert-icon">!</span><div id="pdf-error-text"></div>
