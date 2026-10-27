@@ -5,17 +5,17 @@
 
   const db = createDb({ auth: { persistSession: false, autoRefreshToken: false } });
   const STUDENT_KEY = 'rotation.student';
-  const CODE_PATTERN = /^[A-Z0-9-]{3,30}$/;
+  const JSQR_URL = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
   const PHOTO_MAX_SIDE = 1280;
   const PHOTO_MAX_BYTES = 200 * 1024;
 
   const state = {
     activities: [],
-    activity: null,   // activity from the QR, or null
+    activity: null,   // activity being checked in, or null
     student: null,    // { codigo, nombre, grado }
     done: [],         // [{ actividad_id, registrado_en }]
     photo: null,      // compressed Blob
-    pending: null,    // student awaiting "Is this you?"
+    draft: null,      // { nombre, grado } waiting for "Is this you?"
   };
 
   const $ = (id) => document.getElementById(id);
@@ -23,6 +23,9 @@
   // ---------------------------------------------------------------- screens
   function show(name) {
     document.querySelectorAll('.screen').forEach((s) => { s.hidden = s.id !== `s-${name}`; });
+    const showId = state.student && !['register', 'confirm', 'loading'].includes(name);
+    $('student-id').hidden = !showId;
+    if (showId) $('student-id').innerHTML = `Your student ID: <strong>${escapeHtml(state.student.codigo)}</strong>`;
     window.scrollTo(0, 0);
   }
 
@@ -65,10 +68,6 @@
     return data || [];
   }
 
-  function normalizeCode(value) {
-    return String(value || '').replace(/\s+/g, '').toUpperCase();
-  }
-
   function rememberStudent(student) {
     state.student = { codigo: student.codigo, nombre: student.nombre, grado: student.grado };
     storageSet(STUDENT_KEY, state.student);
@@ -78,6 +77,21 @@
     state.student = null;
     state.done = [];
     storageRemove(STUDENT_KEY);
+  }
+
+  function setActivity(activity) {
+    state.activity = activity;
+    const tag = $('activity-tag');
+    tag.hidden = !activity;
+    if (activity) {
+      tag.innerHTML = `${escapeHtml(activity.nombre)} <small>· ${escapeHtml(activity.salon)}</small>`;
+      history.replaceState(null, '', `?activity=${encodeURIComponent(activity.id)}`);
+    }
+  }
+
+  function allDone() {
+    const doneIds = new Set(state.done.map((d) => d.actividad_id));
+    return state.activities.length > 0 && state.activities.every((a) => doneIds.has(a.id));
   }
 
   // ---------------------------------------------------------------- progress
@@ -126,13 +140,12 @@
     }
 
     if (activityId) {
-      state.activity = state.activities.find((a) => a.id === activityId) || null;
-      if (!state.activity) return show('not-found');
-      const tag = $('activity-tag');
-      tag.innerHTML = `${escapeHtml(state.activity.nombre)} <small>· ${escapeHtml(state.activity.salon)}</small>`;
-      tag.hidden = false;
+      const activity = state.activities.find((a) => a.id === activityId);
+      if (!activity) return show('not-found');
+      setActivity(activity);
     }
 
+    // First visit, whichever QR the student scans first.
     if (!state.student) return showRegister();
     return goToMain();
   }
@@ -161,80 +174,65 @@
 
   // ---------------------------------------------------------------- register
   function showRegister(message) {
-    selectTab('new');
     setAlert('register-error', message || '');
     show('register');
   }
 
-  function selectTab(which) {
-    $('tab-new').setAttribute('aria-selected', String(which === 'new'));
-    $('tab-existing').setAttribute('aria-selected', String(which === 'existing'));
-    $('form-new').hidden = which !== 'new';
-    $('form-existing').hidden = which !== 'existing';
-    setAlert('register-error', '');
-  }
-  $('tab-new').addEventListener('click', () => selectTab('new'));
-  $('tab-existing').addEventListener('click', () => selectTab('existing'));
-
-  $('form-new').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const name = $('f-name').value.trim().replace(/\s+/g, ' ');
-    const code = normalizeCode($('f-code').value);
-    const grade = $('f-grade').value.trim();
-
-    if (name.length < 3 || !name.includes(' ')) return setAlert('register-error', 'Please write your full name (first and last name).');
-    if (!CODE_PATTERN.test(code)) return setAlert('register-error', 'Please check your student ID. Use 3 to 30 letters or numbers, without spaces or symbols.');
-    if (!grade) return setAlert('register-error', 'Please write your course or group.');
-    setAlert('register-error', '');
-
-    const button = e.submitter || e.target.querySelector('button');
+  async function register(nombre, grado, confirmed, button) {
     setBusy(button, true, 'Saving…');
-    const { data, error } = await db.rpc('registrar_estudiante', { p_codigo: code, p_nombre: name, p_grado: grade });
+    const { data, error } = await db.rpc('registrar_estudiante_nuevo', {
+      p_nombre: nombre, p_grado: grado, p_confirmado: confirmed,
+    });
     setBusy(button, false);
 
-    if (error) return setAlert('register-error', friendlyError(error));
-    if (data.status === 'exists') return askIsThisYou(data);
+    if (error) {
+      setAlert('register-error', friendlyError(error));
+      return show('register');
+    }
+    if (data.status === 'possible_match') {
+      state.draft = { nombre, grado };
+      return showMatches(data.matches);
+    }
+    state.draft = null;
     rememberStudent(data);
     goToMain();
-  });
+  }
 
-  $('form-existing').addEventListener('submit', async (e) => {
+  $('form-new').addEventListener('submit', (e) => {
     e.preventDefault();
-    const code = normalizeCode($('f-code-existing').value);
-    if (!CODE_PATTERN.test(code)) return setAlert('register-error', 'Please check your student ID. Use 3 to 30 letters or numbers, without spaces or symbols.');
+    const nombre = $('f-name').value.trim().replace(/\s+/g, ' ');
+    const grado = $('f-grade').value.trim();
+
+    if (nombre.length < 3 || !nombre.includes(' ')) return setAlert('register-error', 'Please write your full name (first and last name).');
+    if (!grado) return setAlert('register-error', 'Please write your course or group.');
     setAlert('register-error', '');
-
-    const button = e.submitter || e.target.querySelector('button');
-    setBusy(button, true, 'Searching…');
-    const { data, error } = await db.rpc('buscar_estudiante', { p_codigo: code });
-    setBusy(button, false);
-
-    if (error) return setAlert('register-error', friendlyError(error));
-    if (!data) return setAlert('register-error', `We couldn't find the student ID ${code}. If this is your first time, choose "First time here".`);
-    askIsThisYou(data);
+    register(nombre, grado, false, e.submitter || e.target.querySelector('button'));
   });
 
-  function askIsThisYou(student) {
-    state.pending = student;
-    $('confirm-code').textContent = student.codigo;
-    $('confirm-name').textContent = student.nombre;
-    $('confirm-grade').textContent = student.grado;
+  function showMatches(matches) {
+    $('confirm-list').innerHTML = matches.map((m, i) => `
+      <button class="match-btn" type="button" data-index="${i}">
+        <span><strong>${escapeHtml(m.nombre)}</strong><br><span class="muted">${escapeHtml(m.grado)}</span></span>
+        <span class="arrow" aria-hidden="true">›</span>
+      </button>`).join('');
+    $('confirm-list').querySelectorAll('.match-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        rememberStudent(matches[Number(button.dataset.index)]);
+        state.draft = null;
+        goToMain();
+      });
+    });
     show('confirm');
   }
-  $('confirm-yes').addEventListener('click', () => {
-    rememberStudent(state.pending);
-    state.pending = null;
-    goToMain();
-  });
-  $('confirm-no').addEventListener('click', () => {
-    state.pending = null;
-    showRegister('Please check your student ID and try again.');
+
+  $('confirm-no').addEventListener('click', (e) => {
+    if (!state.draft) return showRegister();
+    register(state.draft.nombre, state.draft.grado, true, e.currentTarget);
   });
 
   $('switch-student').addEventListener('click', () => {
     forgetStudent();
     $('form-new').reset();
-    $('form-existing').reset();
     showRegister();
   });
 
@@ -371,12 +369,166 @@
       ? `${state.student.nombre} · ${when}`
       : `Your check-in was saved on ${when}. There's no need to do it again.`;
 
-    const { count, total } = renderProgress($('done-progress'));
-    $('done-next').textContent = count >= total
+    const { total } = renderProgress($('done-progress'));
+    const finished = allDone();
+    $('btn-next').hidden = finished;
+    $('done-next').textContent = finished
       ? `🎉 Great job! You've completed all ${total} activities.`
-      : 'Next: go to one of your pending classrooms and scan its QR code.';
+      : 'When you get to your next classroom, tap "Next activity" and scan its QR code.';
     show('done');
   }
+
+  // ---------------------------------------------------------------- QR scanner
+  const scanner = {
+    stream: null,
+    detector: null,
+    timer: null,
+    canvas: document.createElement('canvas'),
+    lastMessageAt: 0,
+  };
+
+  function scannerMessage(text, isError) {
+    $('scanner-msg').textContent = text;
+    $('scanner-msg').classList.toggle('is-error', !!isError);
+  }
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = src;
+      script.onload = resolve;
+      script.onerror = () => reject(new Error('Failed to fetch the scanner'));
+      document.head.appendChild(script);
+    });
+  }
+
+  async function getDetector() {
+    if ('BarcodeDetector' in window) {
+      try {
+        const formats = await window.BarcodeDetector.getSupportedFormats();
+        if (formats.includes('qr_code')) {
+          const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+          return async (video) => {
+            const codes = await detector.detect(video);
+            return codes.length ? codes[0].rawValue : null;
+          };
+        }
+      } catch { /* fall back to jsQR */ }
+    }
+    if (!window.jsQR) await loadScript(JSQR_URL);
+    return async (video) => {
+      const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight));
+      const w = Math.round(video.videoWidth * scale);
+      const h = Math.round(video.videoHeight * scale);
+      if (!w || !h) return null;
+      scanner.canvas.width = w;
+      scanner.canvas.height = h;
+      const ctx = scanner.canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(video, 0, 0, w, h);
+      const code = window.jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' });
+      return code ? code.data : null;
+    };
+  }
+
+  async function openScanner() {
+    $('scanner').hidden = false;
+    $('scanner').classList.remove('is-found');
+    document.body.style.overflow = 'hidden';
+    scannerMessage('Starting camera…');
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return scannerMessage("This browser can't open the camera here. Scan the QR code with your phone's camera app instead.", true);
+    }
+
+    try {
+      scanner.stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } }, audio: false,
+      });
+    } catch (err) {
+      console.error(err);
+      const denied = err && /NotAllowed|Permission/i.test(err.name || err.message);
+      return scannerMessage(denied
+        ? 'Camera access was blocked. Allow camera access for this site in your browser settings and try again.'
+        : "We couldn't open the camera. Close other apps using it and try again.", true);
+    }
+
+    // The scanner may have been closed while waiting for permission.
+    if ($('scanner').hidden) return stopCamera();
+
+    const video = $('scanner-video');
+    video.srcObject = scanner.stream;
+    try { await video.play(); } catch { /* autoplay attribute handles it */ }
+
+    try {
+      scanner.detector = await getDetector();
+    } catch (err) {
+      console.error(err);
+      return scannerMessage(friendlyError(err), true);
+    }
+    scannerMessage('Point your camera at the QR code posted at the classroom door.');
+    scanLoop();
+  }
+
+  function scanLoop() {
+    scanner.timer = setTimeout(async () => {
+      if ($('scanner').hidden || !scanner.stream) return;
+      const video = $('scanner-video');
+      let text = null;
+      if (video.readyState >= 2) {
+        try { text = await scanner.detector(video); } catch (err) { console.error(err); }
+      }
+      if (text && handleScan(text)) return;
+      scanLoop();
+    }, 200);
+  }
+
+  // Returns true when the code was a valid activity and the scanner closed.
+  function handleScan(text) {
+    let id = '';
+    try {
+      const url = new URL(text, location.href);
+      id = (url.searchParams.get('activity') || url.searchParams.get('actividad') || '').trim().toLowerCase();
+    } catch { /* not a URL */ }
+
+    const activity = state.activities.find((a) => a.id === id);
+    if (!activity) {
+      if (Date.now() - scanner.lastMessageAt > 1500) {
+        scanner.lastMessageAt = Date.now();
+        scannerMessage("That QR code isn't from the Language Rotation. Try the one posted at the classroom door.", true);
+      }
+      return false;
+    }
+
+    $('scanner').classList.add('is-found');
+    scannerMessage(`Found: ${activity.nombre} · ${activity.salon}`);
+    if (navigator.vibrate) navigator.vibrate(80);
+    setTimeout(() => {
+      closeScanner();
+      setActivity(activity);
+      if (!state.student) return showRegister();
+      goToMain();
+    }, 350);
+    return true;
+  }
+
+  function stopCamera() {
+    clearTimeout(scanner.timer);
+    if (scanner.stream) scanner.stream.getTracks().forEach((t) => t.stop());
+    scanner.stream = null;
+    $('scanner-video').srcObject = null;
+  }
+
+  function closeScanner() {
+    stopCamera();
+    $('scanner').hidden = true;
+    document.body.style.overflow = '';
+  }
+
+  document.querySelectorAll('[data-scan]').forEach((b) => b.addEventListener('click', openScanner));
+  $('scanner-close').addEventListener('click', closeScanner);
+  $('scanner-cancel').addEventListener('click', closeScanner);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('scanner').hidden) closeScanner(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && !$('scanner').hidden) closeScanner(); });
 
   // ---------------------------------------------------------------- start
   fillBranding();

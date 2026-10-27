@@ -59,7 +59,7 @@
       </div>
       <div class="toolbar-actions">
         <button class="btn btn-secondary btn-small" id="btn-refresh" type="button">↻ Refresh</button>
-        <button class="btn btn-small" id="btn-download" type="button">⬇ Download Excel</button>
+        <button class="btn btn-small" id="btn-download" type="button">⬇ Download PDF</button>
       </div>
     </div>
 
@@ -103,6 +103,43 @@
   </main>
 
   <footer class="site-footer" data-footer></footer>
+
+  <!-- PDF download options -->
+  <div class="modal" id="pdf-modal" role="dialog" aria-modal="true" aria-labelledby="pdf-title" hidden>
+    <form class="modal-card" id="pdf-form">
+      <h2 id="pdf-title">Download PDF report</h2>
+      <p class="muted" style="margin-top:-6px">Choose what to include in the report.</p>
+
+      <label class="option">
+        <input type="radio" name="pdf-scope" value="activity" checked>
+        <span class="option-body">
+          <strong id="pdf-activity-label">One activity</strong><br>
+          <span class="muted">Students who attended, with date, time and photo, plus who is still missing.</span>
+          <select class="select" id="pdf-activity" aria-label="Activity"></select>
+        </span>
+      </label>
+
+      <label class="option">
+        <input type="radio" name="pdf-scope" value="all">
+        <span class="option-body">
+          <strong>Full report – all activities</strong><br>
+          <span class="muted">Summary, every student's progress, and the attendance list of each activity.</span>
+        </span>
+      </label>
+
+      <label class="check" style="min-height:auto"><input type="checkbox" id="pdf-photos" checked> Include photo thumbnails</label>
+
+      <div class="alert alert-error" id="pdf-error" role="alert" hidden>
+        <span class="alert-icon">!</span><div id="pdf-error-text"></div>
+      </div>
+      <p class="muted" id="pdf-status" role="status"></p>
+
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="pdf-cancel" type="button">Cancel</button>
+        <button class="btn" id="pdf-submit" type="submit">⬇ Download PDF</button>
+      </div>
+    </form>
+  </div>
 
   <!-- Photo viewer -->
   <div class="lightbox" id="lightbox" hidden>
