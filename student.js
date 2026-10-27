@@ -386,10 +386,14 @@
     show('thanks');
   }
 
-  // Browsers only let a page close tabs it opened itself; otherwise show a goodbye.
+  // Sign the student out of this phone and go back to the registration screen.
   $('btn-exit').addEventListener('click', () => {
-    window.close();
-    setTimeout(() => { if (!window.closed) show('bye'); }, 300);
+    forgetStudent();
+    state.activity = null;
+    $('activity-tag').hidden = true;
+    history.replaceState(null, '', location.pathname);
+    $('form-new').reset();
+    showRegister();
   });
 
   // ---------------------------------------------------------------- QR scanner
