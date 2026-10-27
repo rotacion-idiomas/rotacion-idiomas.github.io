@@ -148,6 +148,7 @@ a { color: var(--green); }
   color: var(--text);
   font: 17px var(--sans);
 }
+.input:disabled { background: var(--bg-alt); color: var(--text-2); }
 .input:focus, .select:focus { outline: 2px solid var(--green); outline-offset: 0; border-color: var(--green); }
 form { display: grid; gap: 16px; }
 
@@ -425,7 +426,10 @@ tr.is-incomplete td:first-child { box-shadow: inset 4px 0 0 var(--gold); }
 .badge-done { background: var(--green-soft); color: var(--green-dark); }
 .badge-pending { background: var(--gold-soft); color: #7A5D00; }
 
-.invites { margin-top: 48px; display: grid; gap: 16px; }
+.admin-tabs { display: inline-grid; grid-auto-flow: column; grid-template-columns: none; margin-top: 20px; }
+.admin-tabs .tab { padding: 0 20px; }
+.admin-panel { margin-top: 24px; display: grid; gap: 16px; }
+.panel-head { display: flex; gap: 12px; align-items: end; justify-content: space-between; flex-wrap: wrap; }
 .section-title { font-family: var(--serif); font-size: 24px; }
 .invite-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
 .invite-form .field { flex: 1 1 260px; }
@@ -515,5 +519,7 @@ tr.is-incomplete td:first-child { box-shadow: inset 4px 0 0 var(--gold); }
   .dash-header { padding: 12px 16px; justify-content: center; }
   .toolbar { flex-direction: column; align-items: stretch; }
   .toolbar .filters { flex: none; }
+  .admin-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
+  .admin-tabs .tab { padding: 0 6px; font-size: 14px; }
   .toolbar .tabs { display: grid; grid-auto-flow: column; }
 }

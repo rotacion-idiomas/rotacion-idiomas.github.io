@@ -41,9 +41,9 @@
     </form>
   </main>
 
-  <!-- Dashboard -->
+  <!-- Dashboard (teachers see their students; the administrator sees everything) -->
   <main class="dash" id="v-dash" hidden>
-    <h1 class="dash-title"><span data-event-title>Activity Rotation</span> · My students</h1>
+    <h1 class="dash-title"><span data-event-title>Activity Rotation</span> · <span id="dash-role">My students</span></h1>
     <p class="activity-info" id="teacher-info" style="margin:6px 0 0"></p>
     <p class="dash-sub" id="last-update"></p>
 
@@ -51,39 +51,72 @@
       <span class="alert-icon">!</span><div id="dash-error-text"></div>
     </div>
 
-    <div class="stats" id="stats"></div>
+    <div class="tabs admin-tabs" role="tablist" id="admin-tabs" hidden>
+      <button class="tab" role="tab" type="button" data-tab="results" aria-selected="true">Results</button>
+      <button class="tab" role="tab" type="button" data-tab="teachers" aria-selected="false">Teachers</button>
+      <button class="tab" role="tab" type="button" data-tab="invites" aria-selected="false">Invitation links</button>
+    </div>
 
-    <div class="toolbar">
-      <div class="filters">
-        <div class="field">
-          <label for="search">Search student</label>
-          <input class="input" id="search" type="search" placeholder="Name or student ID">
+    <!-- Results -->
+    <section id="p-results">
+      <div class="stats" id="stats"></div>
+
+      <div class="toolbar">
+        <div class="filters">
+          <div class="field" data-admin-only hidden>
+            <label for="f-teacher">Teacher</label>
+            <select class="select" id="f-teacher"></select>
+          </div>
+          <div class="field" data-admin-only hidden>
+            <label for="f-activity">Show photos of</label>
+            <select class="select" id="f-activity"></select>
+          </div>
+          <div class="field">
+            <label for="search">Search student</label>
+            <input class="input" id="search" type="search" placeholder="Name or student ID">
+          </div>
+          <label class="check"><input type="checkbox" id="only-incomplete"> Show only students who haven't finished</label>
         </div>
-        <label class="check"><input type="checkbox" id="only-incomplete"> Show only students who haven't finished</label>
+        <div class="toolbar-actions">
+          <button class="btn btn-secondary btn-small" id="btn-refresh" type="button">↻ Refresh</button>
+          <button class="btn btn-small" id="btn-download" type="button">⬇ Download PDF</button>
+        </div>
       </div>
-      <div class="toolbar-actions">
-        <button class="btn btn-secondary btn-small" id="btn-refresh" type="button">↻ Refresh</button>
-        <button class="btn btn-small" id="btn-download" type="button">⬇ Download PDF</button>
+
+      <div class="table-wrap">
+        <table>
+          <thead id="students-head"></thead>
+          <tbody id="students-rows"></tbody>
+        </table>
       </div>
-    </div>
+    </section>
 
-    <div class="table-wrap">
-      <table>
-        <thead id="students-head"></thead>
-        <tbody id="students-rows"></tbody>
-      </table>
-    </div>
+    <!-- Administrator: teachers -->
+    <section class="admin-panel" id="p-teachers" hidden>
+      <div class="panel-head">
+        <div>
+          <h2 class="section-title">Teachers</h2>
+          <p class="muted">Teachers who created their account, with their activity. You can also add one yourself.</p>
+        </div>
+        <button class="btn btn-small" id="btn-add-teacher" type="button">＋ Add teacher</button>
+      </div>
+      <div class="alert alert-error" id="teachers-error" role="alert" hidden>
+        <span class="alert-icon">!</span><div id="teachers-error-text"></div>
+      </div>
+      <div class="invite-list" id="teacher-rows"></div>
+    </section>
 
-    <!-- Coordinator only: single-use sign-up links for teachers -->
-    <section class="invites" id="invites" hidden>
+    <!-- Administrator: single-use sign-up links -->
+    <section class="admin-panel" id="p-invites" hidden>
       <div>
-        <h2 class="section-title">Invite teachers</h2>
-        <p class="muted">Send each teacher their own link. It works only once: after the teacher creates their account, the link stops working.</p>
+        <h2 class="section-title">Invitation links</h2>
+        <p class="muted">Create a link and send it to a teacher. The teacher fills in all their details (name, email, activity and password). Each link works only once.</p>
       </div>
       <form class="invite-form" id="invite-form" novalidate>
         <div class="field">
-          <label for="invite-note">Who is it for? <span class="muted" style="font-weight:normal">(optional)</span></label>
-          <input class="input" id="invite-note" maxlength="80" placeholder="e.g. Laura Martínez">
+          <label for="invite-note">Note for yourself <span class="muted" style="font-weight:normal">(optional)</span></label>
+          <input class="input" id="invite-note" maxlength="80" placeholder="e.g. Sent to the French teacher">
+          <span class="hint">Only you see this note. It helps you remember who you sent the link to.</span>
         </div>
         <button class="btn btn-small" type="submit">＋ New invitation link</button>
       </form>
@@ -112,6 +145,42 @@
       <div class="modal-actions">
         <button class="btn btn-secondary" id="pdf-cancel" type="button">Cancel</button>
         <button class="btn" id="pdf-submit" type="submit">⬇ Download PDF</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Administrator: add / edit a teacher -->
+  <div class="modal" id="teacher-modal" role="dialog" aria-modal="true" aria-labelledby="teacher-title" hidden>
+    <form class="modal-card" id="teacher-form" novalidate>
+      <h2 id="teacher-title">Add teacher</h2>
+      <p class="muted" style="margin-top:-6px" id="teacher-desc"></p>
+      <div class="field">
+        <label for="tm-name">Full name</label>
+        <input class="input" id="tm-name" autocomplete="off" autocapitalize="words" maxlength="100">
+      </div>
+      <div class="field">
+        <label for="tm-email">Email</label>
+        <input class="input" id="tm-email" type="email" autocomplete="off" autocapitalize="off">
+      </div>
+      <div class="field">
+        <label for="tm-activity">Name of the activity</label>
+        <input class="input" id="tm-activity" autocomplete="off" maxlength="60">
+      </div>
+      <div class="field">
+        <label for="tm-room">Classroom <span class="muted" style="font-weight:normal">(optional)</span></label>
+        <input class="input" id="tm-room" autocomplete="off" maxlength="40">
+      </div>
+      <div class="field" id="tm-password-field">
+        <label for="tm-password">Password</label>
+        <input class="input" id="tm-password" type="text" autocomplete="off" minlength="8">
+        <span class="hint">At least 8 characters. Give it to the teacher with their email so they can sign in.</span>
+      </div>
+      <div class="alert alert-error" id="tm-error" role="alert" hidden>
+        <span class="alert-icon">!</span><div id="tm-error-text"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="tm-cancel" type="button">Cancel</button>
+        <button class="btn" id="tm-submit" type="submit">Save</button>
       </div>
     </form>
   </div>
