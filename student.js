@@ -158,6 +158,8 @@
       return showError(err, goToMain);
     }
 
+    if (allDone()) return showThanks();
+
     if (!state.activity) {
       renderProgress($('welcome-progress'));
       return show('welcome');
@@ -359,6 +361,8 @@
 
   // ---------------------------------------------------------------- done
   function showDone(record, isNew) {
+    if (allDone()) return showThanks();
+
     const when = `${formatDate(record.registrado_en)} at ${formatTime(record.registrado_en)}`;
     $('done-icon').classList.toggle('is-warning', !isNew);
     $('done-icon').textContent = isNew ? '✓' : '!';
@@ -369,14 +373,24 @@
       ? `${state.student.nombre} · ${when}`
       : `Your check-in was saved on ${when}. There's no need to do it again.`;
 
-    const { total } = renderProgress($('done-progress'));
-    const finished = allDone();
-    $('btn-next').hidden = finished;
-    $('done-next').textContent = finished
-      ? `🎉 Great job! You've completed all ${total} activities.`
-      : 'When you get to your next classroom, tap "Next activity" and scan its QR code.';
+    renderProgress($('done-progress'));
+    $('done-next').textContent = 'When you get to your next classroom, tap "Next activity" and scan its QR code.';
     show('done');
   }
+
+  function showThanks() {
+    const total = state.activities.length;
+    $('thanks-title').textContent = `Thank you, ${state.student.nombre.split(' ')[0]}!`;
+    $('thanks-text').textContent = `You've completed all ${total} activities of the ${window.App.cfg.EVENT_TITLE}.`;
+    renderProgress($('thanks-progress'));
+    show('thanks');
+  }
+
+  // Browsers only let a page close tabs it opened itself; otherwise show a goodbye.
+  $('btn-exit').addEventListener('click', () => {
+    window.close();
+    setTimeout(() => { if (!window.closed) show('bye'); }, 300);
+  });
 
   // ---------------------------------------------------------------- QR scanner
   const scanner = {
@@ -494,7 +508,7 @@
     if (!activity) {
       if (Date.now() - scanner.lastMessageAt > 1500) {
         scanner.lastMessageAt = Date.now();
-        scannerMessage("That QR code isn't from the Language Rotation. Try the one posted at the classroom door.", true);
+        scannerMessage("That QR code isn't from the Activity Rotation. Try the one posted at the classroom door.", true);
       }
       return false;
     }

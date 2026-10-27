@@ -1,5 +1,5 @@
 /* ===================================================================
-   Universidad Simón Bolívar – Language Rotation
+   Universidad Simón Bolívar – Activity Rotation
    Colors and type follow branding-unisimon.md
    =================================================================== */
 :root {
@@ -250,6 +250,24 @@ form { display: grid; gap: 16px; }
 .progress-list .is-current .name { font-weight: bold; }
 
 .link-btn.center { display: block; margin: 0 auto; }
+
+/* ---------- Thank-you screen ---------- */
+.thanks { text-align: center; display: grid; gap: 10px; padding: 28px 20px; border-top: 6px solid var(--green); }
+.thanks h2 { font-family: var(--serif); font-size: 30px; color: var(--green-dark); }
+.thanks-text { font-size: 18px; }
+.thanks-badge {
+  width: 96px; height: 96px;
+  margin: 0 auto 6px;
+  border-radius: 50%;
+  background: var(--gold);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 54px;
+  box-shadow: 0 0 0 8px var(--gold-soft);
+  animation: pop .5s ease-out;
+}
+@keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
 .student-id { margin-top: 20px; text-align: center; font-size: 14px; color: var(--text-2); }
 .student-id strong { color: var(--text); letter-spacing: .08em; }

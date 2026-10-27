@@ -7,7 +7,7 @@ window.APP_CONFIG = {
   // Address printed inside the QR codes.
   SITE_URL: 'https://rotacion-idiomas.github.io/',
 
-  EVENT_TITLE: 'Language Rotation',
+  EVENT_TITLE: 'Activity Rotation',
   FOOTER: 'Instituto de Lenguas Extranjeras – Universidad Simón Bolívar',
   TIME_ZONE: 'America/Bogota',
 };

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#09843B">
-  <title>Language Rotation – Check-in</title>
+  <title>Activity Rotation – Check-in</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%2309843B'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' stroke='white' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -14,7 +14,7 @@
   </header>
 
   <main class="container">
-    <h1 class="event-title" data-event-title>Language Rotation</h1>
+    <h1 class="event-title" data-event-title>Activity Rotation</h1>
     <p class="activity-tag" id="activity-tag" hidden></p>
 
     <!-- Loading -->
@@ -126,6 +126,27 @@
       <p class="lead center" id="done-next"></p>
       <button class="btn" id="btn-next" type="button" data-scan>📷 Next activity</button>
       <div class="card" id="done-progress"></div>
+    </section>
+
+    <!-- All activities completed -->
+    <section class="screen" id="s-thanks" hidden>
+      <div class="card thanks">
+        <div class="thanks-badge" aria-hidden="true">★</div>
+        <h2 id="thanks-title">Thank you!</h2>
+        <p class="thanks-text" id="thanks-text"></p>
+        <p class="lead">Your attendance has been recorded. We hope you enjoyed the activities!</p>
+      </div>
+      <div class="card" id="thanks-progress"></div>
+      <button class="btn" id="btn-exit" type="button">Exit</button>
+    </section>
+
+    <!-- After "Exit" when the browser won't close the tab -->
+    <section class="screen" id="s-bye" hidden>
+      <div class="card thanks">
+        <div class="thanks-badge" aria-hidden="true">✓</div>
+        <h2>You're all set!</h2>
+        <p class="lead">You can close this page now. Thank you for participating.</p>
+      </div>
     </section>
 
     <p class="student-id" id="student-id" hidden></p>
