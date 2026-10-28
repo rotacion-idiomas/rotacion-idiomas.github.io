@@ -173,6 +173,18 @@
         <label for="tm-room">Classroom <span class="muted" style="font-weight:normal">(optional)</span></label>
         <input class="input" id="tm-room" autocomplete="off" maxlength="40">
       </div>
+      <div class="field" id="tm-reset" hidden>
+        <span style="font-weight:bold;font-size:15px">Password</span>
+        <span class="hint" style="font-size:14px">Nobody can see the teacher's password. If they forgot it, send them a link to choose a new one (it works once, for 48 hours).</span>
+        <button class="btn btn-secondary btn-small" id="tm-reset-btn" type="button">🔑 Create password-change link</button>
+        <div class="invite is-new" id="tm-reset-box" hidden>
+          <span class="invite-link" id="tm-reset-link"></span>
+          <div class="invite-actions">
+            <button class="btn btn-small" id="tm-reset-copy" type="button">Copy link</button>
+            <a class="btn btn-secondary btn-small" id="tm-reset-wa" href="#" target="_blank" rel="noopener">Send by WhatsApp</a>
+          </div>
+        </div>
+      </div>
       <div class="field" id="tm-password-field">
         <label for="tm-password">Password</label>
         <input class="input" id="tm-password" type="text" autocomplete="off" minlength="8">

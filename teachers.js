@@ -431,6 +431,10 @@
     $('tm-room').value = activity ? activity.salon : '';
     $('tm-password').value = '';
     $('tm-password-field').hidden = !!teacher;
+    $('tm-reset').hidden = !teacher;
+    $('tm-reset-box').hidden = true;
+    $('tm-reset-btn').disabled = false;
+    $('tm-reset-btn').textContent = '🔑 Create password-change link';
     setAlert('tm-error', '');
     $('teacher-modal').hidden = false;
     $('tm-name').focus();
@@ -440,6 +444,29 @@
     if ($('tm-submit').disabled) return;
     $('teacher-modal').hidden = true;
   }
+
+  // Single-use link for the teacher to choose a new password.
+  $('tm-reset-btn').addEventListener('click', async () => {
+    const button = $('tm-reset-btn');
+    button.disabled = true;
+    const { data, error } = await db.rpc('admin_link_contrasena', { p_email: editing.email });
+    button.disabled = false;
+    if (error) return setAlert('tm-error', friendlyError(error));
+    setAlert('tm-error', '');
+    const link = `${cfg.SITE_URL}reset-password.html?code=${encodeURIComponent(data)}`;
+    const message = `Hi ${editing.nombre || ''}! Use this link to choose a new password for the ${cfg.EVENT_TITLE} dashboard (it works once, for 48 hours): ${link}`;
+    $('tm-reset-link').textContent = link;
+    $('tm-reset-copy').dataset.link = link;
+    $('tm-reset-wa').href = `https://wa.me/?text=${encodeURIComponent(message)}`;
+    $('tm-reset-box').hidden = false;
+    button.textContent = '🔑 Create another link';
+  });
+
+  $('tm-reset-copy').addEventListener('click', async () => {
+    await copyText($('tm-reset-copy').dataset.link);
+    $('tm-reset-copy').textContent = 'Copied ✓';
+    setTimeout(() => { $('tm-reset-copy').textContent = 'Copy link'; }, 2000);
+  });
 
   $('btn-add-teacher').addEventListener('click', () => openTeacherModal(null));
   $('tm-cancel').addEventListener('click', closeTeacherModal);
