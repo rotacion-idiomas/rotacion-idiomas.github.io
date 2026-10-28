@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 200" width="520" height="400">
+  <!-- Gold crown drawn over the student's head in the check-in selfie (crown.png is made from this file). -->
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFF7C7"/>
+      <stop offset=".35" stop-color="#FAD55C"/>
+      <stop offset=".75" stop-color="#E0A81E"/>
+      <stop offset="1" stop-color="#B57B0A"/>
+    </linearGradient>
+    <linearGradient id="band" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FBE07A"/>
+      <stop offset=".5" stop-color="#E9B32A"/>
+      <stop offset="1" stop-color="#A86F06"/>
+    </linearGradient>
+    <radialGradient id="pearl" cx=".35" cy=".3" r=".75">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset=".6" stop-color="#FFF1BF"/>
+      <stop offset="1" stop-color="#D9AE3C"/>
+    </radialGradient>
+    <radialGradient id="ruby" cx=".35" cy=".3" r=".8">
+      <stop offset="0" stop-color="#FFB3B3"/>
+      <stop offset=".45" stop-color="#E8243C"/>
+      <stop offset="1" stop-color="#8E0A1E"/>
+    </radialGradient>
+    <radialGradient id="sapphire" cx=".35" cy=".3" r=".8">
+      <stop offset="0" stop-color="#BFE3FF"/>
+      <stop offset=".45" stop-color="#2F7BEA"/>
+      <stop offset="1" stop-color="#123D8F"/>
+    </radialGradient>
+    <radialGradient id="emerald" cx=".35" cy=".3" r=".8">
+      <stop offset="0" stop-color="#C9FFD9"/>
+      <stop offset=".45" stop-color="#16B25A"/>
+      <stop offset="1" stop-color="#075F2C"/>
+    </radialGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#5A3A00" flood-opacity=".45"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#shadow)">
+    <!-- Body with five points -->
+    <path d="M38 150 L22 62 L78 108 L130 36 L182 108 L238 62 L222 150 Z"
+          fill="url(#gold)" stroke="#8A5600" stroke-width="5" stroke-linejoin="round"/>
+    <!-- Shine on the body -->
+    <path d="M44 138 L34 84 L76 118" fill="none" stroke="#FFFBE6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity=".7"/>
+    <path d="M130 52 L104 96" fill="none" stroke="#FFFBE6" stroke-width="4" stroke-linecap="round" opacity=".6"/>
+    <!-- Heart-shaped gem in the middle -->
+    <path d="M130 128 L114 110 A9 9 0 0 1 130 98 A9 9 0 0 1 146 110 Z" fill="url(#ruby)" stroke="#8A5600" stroke-width="3" stroke-linejoin="round"/>
+    <!-- Band -->
+    <rect x="30" y="140" width="200" height="40" rx="12" fill="url(#band)" stroke="#8A5600" stroke-width="5"/>
+    <path d="M44 150 H216" stroke="#FFF4C2" stroke-width="4" stroke-linecap="round" opacity=".75"/>
+    <!-- Gems on the band -->
+    <ellipse cx="72" cy="161" rx="13" ry="10" fill="url(#sapphire)" stroke="#8A5600" stroke-width="3"/>
+    <path d="M130 147 L144 161 L130 175 L116 161 Z" fill="url(#ruby)" stroke="#8A5600" stroke-width="3" stroke-linejoin="round"/>
+    <ellipse cx="188" cy="161" rx="13" ry="10" fill="url(#emerald)" stroke="#8A5600" stroke-width="3"/>
+    <circle cx="101" cy="161" r="4.5" fill="url(#pearl)"/>
+    <circle cx="159" cy="161" r="4.5" fill="url(#pearl)"/>
+    <!-- Pearls on the tips -->
+    <circle cx="22" cy="55" r="11" fill="url(#pearl)" stroke="#8A5600" stroke-width="3.5"/>
+    <circle cx="130" cy="27" r="13" fill="url(#pearl)" stroke="#8A5600" stroke-width="3.5"/>
+    <circle cx="238" cy="55" r="11" fill="url(#pearl)" stroke="#8A5600" stroke-width="3.5"/>
+    <circle cx="78" cy="104" r="6" fill="url(#pearl)" stroke="#8A5600" stroke-width="2.5"/>
+    <circle cx="182" cy="104" r="6" fill="url(#pearl)" stroke="#8A5600" stroke-width="2.5"/>
+  </g>
+
+  <!-- Sparkles -->
+  <g fill="#FFF6B8" stroke="#E9B32A" stroke-width="1.5" stroke-linejoin="round">
+    <path d="M60 14 L64 26 L76 30 L64 34 L60 46 L56 34 L44 30 L56 26 Z"/>
+    <path d="M200 6 L203 16 L213 19 L203 22 L200 32 L197 22 L187 19 L197 16 Z"/>
+    <path d="M246 112 L248.5 119.5 L256 122 L248.5 124.5 L246 132 L243.5 124.5 L236 122 L243.5 119.5 Z"/>
+    <path d="M10 108 L12 114 L18 116 L12 118 L10 124 L8 118 L2 116 L8 114 Z"/>
+  </g>
+</svg>

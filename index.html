@@ -40,7 +40,7 @@
           The QR code you scanned doesn't match any activity. Please scan the QR code posted in the classroom again, or ask your teacher for help.
         </div>
       </div>
-      <button class="btn" type="button" data-scan>📷 Scan QR code</button>
+      <button class="btn" type="button" data-scan>🤳 Take a selfie with the QR code</button>
     </section>
 
     <!-- The teacher isn't running this activity right now -->
@@ -49,7 +49,7 @@
         <span class="alert-icon">!</span>
         <div><strong id="closed-title">This activity isn't open right now</strong><span id="closed-text"></span></div>
       </div>
-      <button class="btn" type="button" data-scan>📷 Scan another QR code</button>
+      <button class="btn" type="button" data-scan>🤳 Selfie with another QR code</button>
       <div class="card" id="closed-progress" hidden></div>
     </section>
 
@@ -57,9 +57,9 @@
     <section class="screen" id="s-welcome" hidden>
       <div class="card">
         <h2>Welcome!</h2>
-        <p class="lead" style="margin-top:8px">To check in, scan the QR code posted at the door of each classroom.</p>
+        <p class="lead" style="margin-top:8px">To check in, take a selfie in each classroom with its QR code behind you. You'll get a crown 👑</p>
       </div>
-      <button class="btn" type="button" data-scan>📷 Scan QR code</button>
+      <button class="btn" type="button" data-scan>🤳 Take selfie</button>
       <div class="card" id="welcome-progress" hidden></div>
     </section>
 
@@ -67,7 +67,7 @@
     <section class="screen" id="s-register" hidden>
       <div>
         <h2>Before you start</h2>
-        <p class="lead" style="margin-top:6px">We only ask for this once. In the next classrooms, you'll just take a photo.</p>
+        <p class="lead" style="margin-top:6px">We only ask for this once. In the next classrooms, you'll just take a selfie.</p>
       </div>
 
       <div class="alert alert-error" id="register-error" role="alert" hidden>
@@ -107,7 +107,7 @@
     <section class="screen" id="s-photo" hidden>
       <div>
         <h2>Hi, <span id="photo-name"></span>!</h2>
-        <p class="lead" style="margin-top:6px">Take a photo in the classroom as proof that you're here.</p>
+        <p class="lead" style="margin-top:6px">Take a selfie with the classroom's QR code behind you. When we see your face and the code, you get your crown 👑</p>
         <button class="link-btn" id="switch-student" type="button">Not you? Switch student</button>
       </div>
 
@@ -115,19 +115,17 @@
         <span class="alert-icon">!</span><div id="photo-error-text"></div>
       </div>
 
-      <input type="file" id="photo-input" accept="image/*" capture="environment" hidden>
+      <input type="file" id="photo-input" accept="image/*" capture="user" hidden>
 
       <div class="photo-placeholder" id="photo-empty">
-        <span class="camera" aria-hidden="true">📷</span>
-        No photo yet
+        <span class="camera" aria-hidden="true">👑</span>
+        No selfie yet
       </div>
-      <img class="photo-preview" id="photo-preview" alt="Your photo" hidden>
+      <img class="photo-preview" id="photo-preview" alt="Your selfie" hidden>
 
-      <button class="btn" id="btn-take" type="button">📷 Take photo</button>
+      <button class="btn" id="btn-take" type="button">🤳 Take selfie</button>
       <button class="btn" id="btn-submit" type="button" hidden>Check in</button>
-      <button class="btn btn-secondary" id="btn-retake" type="button" hidden>Retake photo</button>
-
-      <button class="link-btn center" type="button" data-scan>Wrong classroom? Scan another QR code</button>
+      <button class="btn btn-secondary" id="btn-retake" type="button" hidden>Retake selfie</button>
 
       <div class="card" id="photo-progress" hidden></div>
     </section>
@@ -140,7 +138,7 @@
         <p class="lead" style="margin-top:6px" id="done-text"></p>
       </div>
       <p class="lead center" id="done-next"></p>
-      <button class="btn" id="btn-next" type="button" data-scan>📷 Next activity</button>
+      <button class="btn" id="btn-next" type="button" data-scan>🤳 Next activity</button>
       <div class="card" id="done-progress"></div>
     </section>
 
@@ -161,19 +159,21 @@
 
   <footer class="site-footer" data-footer></footer>
 
-  <!-- In-page QR scanner -->
-  <div class="scanner" id="scanner" role="dialog" aria-modal="true" aria-labelledby="scanner-title" hidden>
+  <!-- Selfie camera with the crown filter -->
+  <div class="scanner camera" id="camera" role="dialog" aria-modal="true" aria-labelledby="camera-title" hidden>
     <div class="scanner-head">
-      <strong id="scanner-title">Scan the classroom QR code</strong>
-      <button class="scanner-close" id="scanner-close" type="button" aria-label="Close">×</button>
+      <strong id="camera-title">Selfie with the QR code</strong>
+      <button class="scanner-close" id="camera-close" type="button" aria-label="Close">×</button>
     </div>
     <div class="scanner-view">
-      <video id="scanner-video" playsinline muted autoplay></video>
-      <div class="scanner-frame" aria-hidden="true"><span></span></div>
+      <video id="camera-video" playsinline muted autoplay></video>
+      <canvas id="camera-canvas" aria-label="Camera preview"></canvas>
     </div>
-    <p class="scanner-msg" id="scanner-msg" role="status">Point your camera at the QR code posted at the classroom door.</p>
-    <div class="scanner-foot">
-      <button class="btn btn-secondary" id="scanner-cancel" type="button">Cancel</button>
+    <p class="scanner-msg" id="camera-msg" role="status">Starting camera…</p>
+    <div class="scanner-foot camera-foot">
+      <button class="btn camera-shoot" id="camera-shoot" type="button" disabled>📸 Take photo</button>
+      <button class="btn btn-secondary" id="camera-fallback" type="button" hidden>Use the camera app instead</button>
+      <button class="btn btn-secondary" id="camera-cancel" type="button">Cancel</button>
     </div>
   </div>
 

@@ -6,8 +6,13 @@
   const db = createDb({ auth: { persistSession: false, autoRefreshToken: false } });
   const STUDENT_KEY = 'rotation.student';
   const JSQR_URL = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
+  const MEDIAPIPE_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+  const FACE_MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite';
   const PHOTO_MAX_SIDE = 1280;
   const PHOTO_MAX_BYTES = 200 * 1024;
+  const QR_MAX_SIDE = 1280;      // the wall's QR code is small in a selfie: read it at good resolution
+  const QR_GRACE_MS = 2500;      // a code seen this recently still counts
+  const CROWN_TILT = 0.35;       // about 20°, to one side
 
   const state = {
     activities: [],   // every activity, open or not
@@ -214,6 +219,7 @@
     }
 
     if (allDone()) return showThanks();
+    loadFaceDetector().catch(() => {});   // ready before the student opens the camera
 
     if (!state.activity) {
       renderProgress($('welcome-progress'));
@@ -223,11 +229,7 @@
     const record = recordWith(state.activity.profesor_id);
     if (record) return showDone(record, false);
     if (!state.activity.activa) return showClosed();
-
-    resetPhoto();
-    $('photo-name').textContent = state.student.nombre.split(' ')[0];
-    renderProgress($('photo-progress'));
-    show('photo');
+    showPhotoScreen();
   }
 
   // ---------------------------------------------------------------- register
@@ -343,35 +345,34 @@
     setAlert('photo-error', '');
   }
 
-  function openCamera() { $('photo-input').click(); }
+  function showPhotoScreen(message) {
+    resetPhoto();
+    $('photo-name').textContent = state.student.nombre.split(' ')[0];
+    renderProgress($('photo-progress'));
+    show('photo');
+    if (message) setAlert('photo-error', message);
+  }
+
+  // The selfie is ready: show it with "Check in" and "Retake selfie".
+  function showPreview(blob, activity) {
+    setActivity(activity);
+    if (!state.student) return showRegister();
+    resetPhoto();
+    state.photo = blob;
+    const preview = $('photo-preview');
+    preview.src = URL.createObjectURL(blob);
+    preview.hidden = false;
+    $('photo-empty').hidden = true;
+    $('btn-take').hidden = true;
+    $('btn-submit').hidden = false;
+    $('btn-retake').hidden = false;
+    $('photo-name').textContent = state.student.nombre.split(' ')[0];
+    renderProgress($('photo-progress'));
+    show('photo');
+  }
+
   $('btn-take').addEventListener('click', openCamera);
   $('btn-retake').addEventListener('click', openCamera);
-
-  $('photo-input').addEventListener('change', async (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    setAlert('photo-error', '');
-    const takeButton = $('btn-take').hidden ? $('btn-retake') : $('btn-take');
-    setBusy(takeButton, true, 'Preparing photo…');
-    try {
-      const blob = await compressImage(file);
-      state.photo = blob;
-      const preview = $('photo-preview');
-      if (preview.src) URL.revokeObjectURL(preview.src);
-      preview.src = URL.createObjectURL(blob);
-      preview.hidden = false;
-      $('photo-empty').hidden = true;
-      $('btn-take').hidden = true;
-      $('btn-submit').hidden = false;
-      $('btn-retake').hidden = false;
-    } catch (err) {
-      console.error(err);
-      setAlert('photo-error', "We couldn't read that photo. Please take it again.");
-    } finally {
-      setBusy(takeButton, false);
-      e.target.value = '';
-    }
-  });
 
   function loadImage(file) {
     return new Promise((resolve, reject) => {
@@ -384,11 +385,10 @@
   }
 
   // Resize to at most 1280 px on the long side and keep it under ~200 KB.
-  async function compressImage(file) {
-    const img = await loadImage(file);
-    const scale = Math.min(1, PHOTO_MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
-    let width = Math.round(img.naturalWidth * scale);
-    let height = Math.round(img.naturalHeight * scale);
+  async function compressImage(source, sourceWidth, sourceHeight) {
+    const scale = Math.min(1, PHOTO_MAX_SIDE / Math.max(sourceWidth, sourceHeight));
+    let width = Math.round(sourceWidth * scale);
+    let height = Math.round(sourceHeight * scale);
     let quality = 0.8;
     const canvas = document.createElement('canvas');
     let blob = null;
@@ -399,7 +399,7 @@
       const ctx = canvas.getContext('2d');
       ctx.fillStyle = '#fff';
       ctx.fillRect(0, 0, width, height);
-      ctx.drawImage(img, 0, 0, width, height);
+      ctx.drawImage(source, 0, 0, width, height);
       blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
       if (!blob) throw new Error('compress_failed');
       if (blob.size <= PHOTO_MAX_BYTES) break;
@@ -473,7 +473,7 @@
     }
 
     renderProgress($('done-progress'));
-    $('done-next').textContent = 'When you get to your next classroom, tap "Next activity" and scan its QR code.';
+    $('done-next').textContent = 'In your next classroom, tap "Next activity" and take a selfie with its QR code behind you.';
     show('done');
   }
 
@@ -508,18 +508,34 @@
     showRegister();
   });
 
-  // ---------------------------------------------------------------- QR scanner
-  const scanner = {
+  // ---------------------------------------------------------------- selfie camera
+  // Front camera with a crown filter. The crown (and "Take photo") appears
+  // when we see the student's face and a valid classroom QR code; the code
+  // also tells which activity the check-in is for.
+  const cam = {
     stream: null,
-    detector: null,
-    timer: null,
-    canvas: document.createElement('canvas'),
-    lastMessageAt: 0,
+    frame: 0,             // requestAnimationFrame id
+    qrTimer: null,
+    readQr: null,         // async (image) => text or null
+    detector: null,       // MediaPipe face detector, once loaded
+    faceless: false,      // the face detector couldn't load: the crown goes on top, without tracking
+    face: null,           // smoothed { x, y, size, angle } in video pixels
+    faceAt: 0,
+    qr: null,             // { activity, at } last valid code seen
+    problem: '',          // why the last code seen isn't valid
+    problemAt: 0,
+    side: 1,              // the crown leans to the right (1) or left (-1)
+    openedAt: 0,
+    ready: false,
+    canvas: document.createElement('canvas'),   // for reading the QR with jsQR
   };
 
-  function scannerMessage(text, isError) {
-    $('scanner-msg').textContent = text;
-    $('scanner-msg').classList.toggle('is-error', !!isError);
+  const crownImg = new Image();
+  crownImg.src = 'crown.png';
+
+  function cameraMessage(text, isError) {
+    if ($('camera-msg').textContent !== text) $('camera-msg').textContent = text;
+    $('camera-msg').classList.toggle('is-error', !!isError);
   }
 
   function loadScript(src) {
@@ -532,134 +548,369 @@
     });
   }
 
-  async function getDetector() {
+  // Reads a QR code from a video or image: the browser's own reader when it
+  // has one (Android), otherwise jsQR (iPhone).
+  async function getQrReader() {
     if ('BarcodeDetector' in window) {
       try {
         const formats = await window.BarcodeDetector.getSupportedFormats();
         if (formats.includes('qr_code')) {
           const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-          return async (video) => {
-            const codes = await detector.detect(video);
+          return async (source) => {
+            const codes = await detector.detect(source);
             return codes.length ? codes[0].rawValue : null;
           };
         }
       } catch { /* fall back to jsQR */ }
     }
     if (!window.jsQR) await loadScript(JSQR_URL);
-    return async (video) => {
-      const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight));
-      const w = Math.round(video.videoWidth * scale);
-      const h = Math.round(video.videoHeight * scale);
+    return async (source) => {
+      const sw = source.videoWidth || source.naturalWidth || source.width;
+      const sh = source.videoHeight || source.naturalHeight || source.height;
+      const scale = Math.min(1, QR_MAX_SIDE / Math.max(sw, sh));
+      const w = Math.round(sw * scale);
+      const h = Math.round(sh * scale);
       if (!w || !h) return null;
-      scanner.canvas.width = w;
-      scanner.canvas.height = h;
-      const ctx = scanner.canvas.getContext('2d', { willReadFrequently: true });
-      ctx.drawImage(video, 0, 0, w, h);
+      cam.canvas.width = w;
+      cam.canvas.height = h;
+      const ctx = cam.canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(source, 0, 0, w, h);
       const code = window.jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' });
       return code ? code.data : null;
     };
   }
 
-  async function openScanner() {
-    $('scanner').hidden = false;
-    $('scanner').classList.remove('is-found');
-    document.body.style.overflow = 'hidden';
-    scannerMessage('Starting camera…');
-    loadLists().catch((err) => console.error(err));   // so newly added activities are recognized
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      return scannerMessage("This browser can't open the camera here. Scan the QR code with your phone's camera app instead.", true);
-    }
-
-    try {
-      scanner.stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' } }, audio: false,
+  // Loaded once, as soon as the student may need it (the files are cached afterwards).
+  let faceDetectorPromise = null;
+  function loadFaceDetector() {
+    if (!faceDetectorPromise) {
+      faceDetectorPromise = (async () => {
+        const vision = await import(`${MEDIAPIPE_URL}/vision_bundle.mjs`);
+        const files = await vision.FilesetResolver.forVisionTasks(`${MEDIAPIPE_URL}/wasm`);
+        // The CPU is fast enough for this small model and works on every phone.
+        return vision.FaceDetector.createFromOptions(files, {
+          baseOptions: { modelAssetPath: FACE_MODEL_URL, delegate: 'CPU' },
+          runningMode: 'VIDEO',
+          minDetectionConfidence: 0.5,
+        });
+      })();
+      faceDetectorPromise.catch((err) => {
+        console.error(err);
+        faceDetectorPromise = null;   // try again next time
       });
-    } catch (err) {
-      console.error(err);
-      const denied = err && /NotAllowed|Permission/i.test(err.name || err.message);
-      return scannerMessage(denied
-        ? 'Camera access was blocked. Allow camera access for this site in your browser settings and try again.'
-        : "We couldn't open the camera. Close other apps using it and try again.", true);
     }
+    return faceDetectorPromise;
+  }
 
-    // The scanner may have been closed while waiting for permission.
-    if ($('scanner').hidden) return stopCamera();
-
-    const video = $('scanner-video');
-    video.srcObject = scanner.stream;
-    try { await video.play(); } catch { /* autoplay attribute handles it */ }
-
+  // Eyes and size of the biggest face, in pixels of the image.
+  function facePose(source, width, height) {
+    let result;
     try {
-      scanner.detector = await getDetector();
+      result = cam.detector.detectForVideo(source, performance.now());
     } catch (err) {
       console.error(err);
-      return scannerMessage(friendlyError(err), true);
+      return null;
     }
-    scannerMessage('Point your camera at the QR code posted at the classroom door.');
-    scanLoop();
+    const faces = (result && result.detections) || [];
+    if (!faces.length) return null;
+    const face = faces.reduce((a, b) => (b.boundingBox.width > a.boundingBox.width ? b : a));
+    const k = face.keypoints || [];
+    if (k.length < 2) return null;
+    // The eye on the left of the image first, so an upright face has angle 0.
+    const [a, b] = [k[0], k[1]].sort((p, q) => p.x - q.x);
+    const ax = a.x * width;
+    const ay = a.y * height;
+    const bx = b.x * width;
+    const by = b.y * height;
+    return { x: (ax + bx) / 2, y: (ay + by) / 2, size: face.boundingBox.width, angle: Math.atan2(by - ay, bx - ax) };
   }
 
-  function scanLoop() {
-    scanner.timer = setTimeout(async () => {
-      if ($('scanner').hidden || !scanner.stream) return;
-      const video = $('scanner-video');
-      let text = null;
-      if (video.readyState >= 2) {
-        try { text = await scanner.detector(video); } catch (err) { console.error(err); }
-      }
-      if (text && handleScan(text)) return;
-      scanLoop();
-    }, 200);
+  // Follows the face smoothly, so the crown doesn't shake.
+  function trackFace(video) {
+    if (!cam.detector) return;
+    const pose = facePose(video, video.videoWidth, video.videoHeight);
+    if (!pose) {
+      if (Date.now() - cam.faceAt > 400) cam.face = null;
+      return;
+    }
+    const f = cam.face;
+    const mix = (from, to) => from + (to - from) * 0.45;
+    cam.face = f ? {
+      x: mix(f.x, pose.x), y: mix(f.y, pose.y), size: mix(f.size, pose.size), angle: mix(f.angle, pose.angle),
+    } : pose;
+    cam.faceAt = Date.now();
   }
 
-  // Returns true when the code was a valid activity and the scanner closed.
-  function handleScan(text) {
+  // Where the crown goes: above the forehead, leaning to one side.
+  function crownPose(face, width, height) {
+    if (!face) {
+      return { x: width / 2 + cam.side * width * 0.18, y: height * 0.24, width: width * 0.36, angle: cam.side * CROWN_TILT };
+    }
+    const ux = Math.cos(face.angle);   // along the eyes
+    const uy = Math.sin(face.angle);
+    const upX = uy;                    // towards the top of the head
+    const upY = -ux;
+    return {
+      x: face.x + upX * face.size * 0.7 + ux * cam.side * face.size * 0.3,
+      y: face.y + upY * face.size * 0.7 + uy * cam.side * face.size * 0.3,
+      width: face.size * 1.05,
+      angle: face.angle + cam.side * CROWN_TILT,
+    };
+  }
+
+  function drawCrown(ctx, pose) {
+    const height = pose.width * (crownImg.naturalHeight / crownImg.naturalWidth);
+    ctx.save();
+    ctx.translate(pose.x, pose.y);
+    ctx.rotate(pose.angle);
+    ctx.drawImage(crownImg, -pose.width / 2, -height * 0.9, pose.width, height);   // the band sits on the head
+    ctx.restore();
+  }
+
+  // Activity name, student and time at the bottom of the photo.
+  function drawStamp(ctx, width, height, activity) {
+    const pad = Math.round(width * 0.03);
+    const big = Math.round(width * 0.042);
+    const small = Math.round(width * 0.032);
+    const band = pad * 2.5 + big + small;
+    const now = new Date();
+    ctx.fillStyle = 'rgba(4, 80, 40, 0.78)';
+    ctx.fillRect(0, height - band, width, band);
+    ctx.fillStyle = '#fff';
+    ctx.textBaseline = 'top';
+    ctx.font = `bold ${big}px Arial, Helvetica, sans-serif`;
+    ctx.fillText(`👑 ${activity.nombre}`, pad, height - band + pad, width - pad * 2);
+    ctx.font = `${small}px Arial, Helvetica, sans-serif`;
+    ctx.fillText(`${state.student ? state.student.nombre : ''} · ${formatDate(now)}, ${formatTime(now)}`,
+      pad, height - band + pad * 1.5 + big, width - pad * 2);
+  }
+
+  // Is this QR code a classroom where the student can check in now?
+  function checkCode(text) {
     let id = '';
     try {
       const url = new URL(text, location.href);
       id = (url.searchParams.get('activity') || url.searchParams.get('actividad') || '').trim().toLowerCase();
     } catch { /* not a URL */ }
+    const activity = activityById(id);
+    if (!activity) return { error: "That QR code isn't from the Activity Rotation." };
+    if (state.student && recordWith(activity.profesor_id)) {
+      const teacher = teacherById(activity.profesor_id);
+      return { error: `You already did ${teacher ? `${teacher.nombre}'s` : 'this teacher\'s'} activity.` };
+    }
+    if (!activity.activa) return { error: `${activity.nombre} isn't open right now.` };
+    return { activity };
+  }
 
-    const activity = state.activities.find((a) => a.id === id);
-    if (!activity) {
-      if (Date.now() - scanner.lastMessageAt > 1500) {
-        scanner.lastMessageAt = Date.now();
-        scannerMessage("That QR code isn't from the Activity Rotation. Try the one posted at the classroom door.", true);
+  function isReady() {
+    const qrOk = cam.qr && Date.now() - cam.qr.at < QR_GRACE_MS;
+    return !!(qrOk && (cam.face || cam.faceless) && crownImg.complete && crownImg.naturalWidth);
+  }
+
+  function updateCameraState(ready) {
+    const now = Date.now();
+    if (ready) cameraMessage('Ready! Take your photo 👑');
+    else if (!cam.detector && !cam.faceless) cameraMessage('Loading the crown filter…');
+    else if (!cam.face && !cam.faceless) cameraMessage("We can't see your face. Look at the screen.");
+    else if (cam.problem && now - cam.problemAt < QR_GRACE_MS) cameraMessage(cam.problem, true);
+    else if (now - cam.openedAt > 8000) cameraMessage('Move closer to the QR code and look for more light.');
+    else cameraMessage("Now show the classroom's QR code behind you.");
+    if (ready && !cam.ready && navigator.vibrate) navigator.vibrate(60);
+    cam.ready = ready;
+    $('camera-shoot').disabled = !ready;
+  }
+
+  // Draws the mirrored video (like a selfie) with the crown, every frame.
+  function drawFrame() {
+    if ($('camera').hidden || !cam.stream) return;
+    const video = $('camera-video');
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    if (video.readyState >= 2 && w && h) {
+      const canvas = $('camera-canvas');
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
       }
-      return false;
+      trackFace(video);
+      const ready = isReady();
+      const ctx = canvas.getContext('2d');
+      ctx.save();
+      ctx.translate(w, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, 0, 0, w, h);
+      if (ready) drawCrown(ctx, crownPose(cam.face, w, h));
+      ctx.restore();
+      updateCameraState(ready);
+    }
+    cam.frame = requestAnimationFrame(drawFrame);
+  }
+
+  function scanLoop() {
+    cam.qrTimer = setTimeout(async () => {
+      if ($('camera').hidden || !cam.stream) return;
+      const video = $('camera-video');
+      if (video.readyState >= 2) {
+        let text = null;
+        try { text = await cam.readQr(video); } catch (err) { console.error(err); }
+        if (text) {
+          const result = checkCode(text);
+          if (result.activity) {
+            cam.qr = { activity: result.activity, at: Date.now() };
+            cam.problem = '';
+          } else {
+            cam.problem = result.error;
+            cam.problemAt = Date.now();
+          }
+        }
+      }
+      scanLoop();
+    }, 250);
+  }
+
+  function useFaceDetector() {
+    cam.detector = null;
+    cam.faceless = false;
+    const timer = setTimeout(() => { if (!cam.detector) cam.faceless = true; }, 20000);
+    loadFaceDetector()
+      .then((detector) => { cam.detector = detector; cam.faceless = false; })
+      .catch(() => { cam.faceless = true; })
+      .finally(() => clearTimeout(timer));
+  }
+
+  function cameraFailed(message) {
+    cameraMessage(message, true);
+    $('camera-fallback').hidden = false;
+  }
+
+  async function openCamera() {
+    $('camera').hidden = false;
+    document.body.style.overflow = 'hidden';
+    Object.assign(cam, { face: null, qr: null, problem: '', ready: false, openedAt: Date.now() });
+    cam.side = Math.random() < 0.5 ? -1 : 1;
+    $('camera-shoot').disabled = true;
+    $('camera-fallback').hidden = true;
+    cameraMessage('Starting camera…');
+    loadLists().catch((err) => console.error(err));   // so newly added or switched activities are recognized
+    useFaceDetector();
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return cameraFailed("This browser can't open the camera here. Use your phone's camera app instead.");
+    }
+    try {
+      cam.stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false,
+      });
+    } catch (err) {
+      console.error(err);
+      const denied = err && /NotAllowed|Permission/i.test(err.name || err.message);
+      return cameraFailed(denied
+        ? 'Camera access was blocked. Allow the camera for this site in your browser settings, or use your camera app.'
+        : "We couldn't open the camera. Close other apps using it and try again.");
     }
 
-    $('scanner').classList.add('is-found');
-    scannerMessage(`Found: ${activity.nombre}${activity.salon ? ` · ${activity.salon}` : ''}`);
-    if (navigator.vibrate) navigator.vibrate(80);
-    setTimeout(() => {
-      closeScanner();
-      setActivity(activity);
-      if (!state.student) return showRegister();
-      goToMain();
-    }, 350);
-    return true;
+    // The camera may have been closed while waiting for permission.
+    if ($('camera').hidden) return stopCamera();
+
+    const video = $('camera-video');
+    video.srcObject = cam.stream;
+    try { await video.play(); } catch { /* autoplay attribute handles it */ }
+
+    try {
+      cam.readQr = await getQrReader();
+    } catch (err) {
+      console.error(err);
+      return cameraFailed(friendlyError(err));
+    }
+    cam.frame = requestAnimationFrame(drawFrame);
+    scanLoop();
   }
 
   function stopCamera() {
-    clearTimeout(scanner.timer);
-    if (scanner.stream) scanner.stream.getTracks().forEach((t) => t.stop());
-    scanner.stream = null;
-    $('scanner-video').srcObject = null;
+    cancelAnimationFrame(cam.frame);
+    clearTimeout(cam.qrTimer);
+    if (cam.stream) cam.stream.getTracks().forEach((t) => t.stop());
+    cam.stream = null;
+    $('camera-video').srcObject = null;
   }
 
-  function closeScanner() {
+  function closeCamera() {
     stopCamera();
-    $('scanner').hidden = true;
+    $('camera').hidden = true;
     document.body.style.overflow = '';
   }
 
-  document.querySelectorAll('[data-scan]').forEach((b) => b.addEventListener('click', openScanner));
-  $('scanner-close').addEventListener('click', closeScanner);
-  $('scanner-cancel').addEventListener('click', closeScanner);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('scanner').hidden) closeScanner(); });
-  document.addEventListener('visibilitychange', () => { if (document.hidden && !$('scanner').hidden) closeScanner(); });
+  // The photo keeps the real orientation (not mirrored), so the QR code reads normally.
+  $('camera-shoot').addEventListener('click', async () => {
+    if (!isReady()) return;
+    const button = $('camera-shoot');
+    button.disabled = true;
+    const video = $('camera-video');
+    const activity = cam.qr.activity;
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, w, h);
+    drawCrown(ctx, crownPose(cam.face, w, h));
+    drawStamp(ctx, w, h, activity);
+    try {
+      const blob = await compressImage(canvas, w, h);
+      closeCamera();
+      showPreview(blob, activity);
+    } catch (err) {
+      console.error(err);
+      cameraMessage("We couldn't save that photo. Please try again.", true);
+      button.disabled = false;
+    }
+  });
+
+  // Without the live camera: a photo from the phone's camera app, checked the same way.
+  $('camera-fallback').addEventListener('click', () => {
+    closeCamera();
+    $('photo-input').click();
+  });
+
+  $('photo-input').addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    e.target.value = '';
+    try {
+      const img = await loadImage(file);
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      const text = await (await getQrReader())(img);
+      const result = text ? checkCode(text) : { error: "We couldn't see the classroom's QR code in your photo. Take it again closer to the code." };
+      if (!result.activity) {
+        if (!state.student) return showRegister();
+        return showPhotoScreen(result.error);
+      }
+      try {
+        const detector = await loadFaceDetector();
+        cam.detector = detector;
+      } catch { /* the crown goes on top */ }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      cam.side = Math.random() < 0.5 ? -1 : 1;
+      drawCrown(ctx, crownPose(cam.detector ? facePose(img, w, h) : null, w, h));
+      drawStamp(ctx, w, h, result.activity);
+      showPreview(await compressImage(canvas, w, h), result.activity);
+    } catch (err) {
+      console.error(err);
+      setAlert('photo-error', "We couldn't read that photo. Please take it again.");
+    }
+  });
+
+  document.querySelectorAll('[data-scan]').forEach((b) => b.addEventListener('click', openCamera));
+  $('camera-close').addEventListener('click', closeCamera);
+  $('camera-cancel').addEventListener('click', closeCamera);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('camera').hidden) closeCamera(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && !$('camera').hidden) closeCamera(); });
 
   // ---------------------------------------------------------------- start
   fillBranding();
