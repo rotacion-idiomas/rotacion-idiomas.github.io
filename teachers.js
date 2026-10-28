@@ -448,7 +448,7 @@
           ${a.activa ? '' : `<button class="btn btn-small" type="button" data-activate="${escapeHtml(a.id)}">Activate</button>`}
           <a class="btn btn-secondary btn-small" href="qr.html?activity=${encodeURIComponent(a.id)}" target="_blank" rel="noopener">QR code</a>
           <button class="btn btn-secondary btn-small" type="button" data-rename="${escapeHtml(a.id)}">Rename</button>
-          ${a.activa || checkIns ? '' : `<button class="btn btn-secondary btn-small btn-danger" type="button" data-remove="${escapeHtml(a.id)}">Delete</button>`}
+          ${list.length < 2 || checkIns ? '' : `<button class="btn btn-secondary btn-small btn-danger" type="button" data-remove="${escapeHtml(a.id)}"${a.activa ? ' data-was-active' : ''}>Delete</button>`}
         </div>
       </div>`;
     }).join('');
@@ -492,7 +492,7 @@
         if (name.length < 2) return setAlert(errorId, 'Please write the name of the activity.');
         call = db.rpc.bind(db, 'actividad_renombrar', { p_actividad: d.renameSave, p_nombre: name });
       } else if (d.remove) {
-        if (!armed(button, 'Tap again to delete')) return;
+        if (!armed(button, 'wasActive' in d ? 'Tap again: the next one becomes active' : 'Tap again to delete')) return;
         call = db.rpc.bind(db, 'actividad_eliminar', { p_actividad: d.remove });
       } else if (d.add) {
         const name = container.querySelector('[data-add-input]').value.trim().replace(/\s+/g, ' ');
@@ -683,7 +683,7 @@
     invalid_groups: 'Please choose the number of groups.',
     groups_in_use: 'Some students already chose a higher group number. Choose more groups.',
     too_many_activities: 'A teacher can have up to 10 activities.',
-    activity_active: 'Activate another activity before deleting this one.',
+    last_activity: 'A teacher needs at least one activity.',
     has_checkins: 'This activity already has check-ins, so it can\'t be deleted.',
     already_teacher: 'This email is already registered as a teacher.',
     not_allowed: 'You don\'t have permission to do this.',

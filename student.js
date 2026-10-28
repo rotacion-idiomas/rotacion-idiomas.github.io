@@ -246,16 +246,20 @@
     fillGroupSelect();
   }
 
-  // The group is only asked when the chosen teacher has more than one.
+  // Shown once a teacher is chosen; with only one group, Group 1 is already selected.
   function fillGroupSelect() {
     const teacher = teacherById(Number($('f-teacher').value));
-    const groups = teacher ? teacher.grupos : 1;
+    const groups = teacher ? teacher.grupos : 0;
     const select = $('f-group');
     const current = Number(select.value);
-    $('f-group-field').hidden = groups < 2;
-    select.innerHTML = '<option value="">Choose your group…</option>' + Array.from({ length: groups }, (_, i) =>
-      `<option value="${i + 1}">Group ${i + 1}</option>`).join('');
-    select.value = current && current <= groups ? String(current) : '';
+    $('f-group-field').hidden = !teacher;
+    select.innerHTML = (groups > 1 ? '<option value="">Choose your group…</option>' : '')
+      + Array.from({ length: groups }, (_, i) => `<option value="${i + 1}">Group ${i + 1}</option>`).join('');
+    if (groups === 1) select.value = '1';
+    else select.value = current && current <= groups ? String(current) : '';
+    $('f-group-hint').textContent = groups > 1
+      ? 'Your teacher has more than one group. Ask them which number is yours.'
+      : 'Your teacher has only one group.';
   }
   $('f-teacher').addEventListener('change', fillGroupSelect);
 
@@ -288,7 +292,7 @@
     e.preventDefault();
     const nombre = $('f-name').value.trim().replace(/\s+/g, ' ');
     const teacher = teacherById(Number($('f-teacher').value));
-    const grupo = teacher && teacher.grupos > 1 ? Number($('f-group').value) : 1;
+    const grupo = Number($('f-group').value);
 
     if (nombre.length < 3 || !nombre.includes(' ')) return setAlert('register-error', 'Please write your full name (first and last name).');
     if (!teacher) return setAlert('register-error', 'Please choose your teacher.');
