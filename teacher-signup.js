@@ -1,6 +1,7 @@
 // Teacher sign-up: creates the account and the teacher's activities.
 (function () {
-  const { createDb, escapeHtml, friendlyError, fillBranding, activityInputs, fillGroupCount } = window.App;
+  const { createDb, escapeHtml, friendlyError, fillBranding, activityInputs, fillGroupCount,
+    groupNameInputs } = window.App;
 
   const db = createDb();
   const code = (new URLSearchParams(location.search).get('code') || '').trim();
@@ -9,6 +10,8 @@
   const activities = activityInputs($('t-activities'), $('t-add-activity'), 't-activity');
   activities.reset();
   fillGroupCount($('t-groups'), 1);
+  const groupNames = groupNameInputs($('t-group-names'), $('t-groups'), 't-group');
+  groupNames.reset();
 
   function show(name) {
     document.querySelectorAll('.screen').forEach((s) => { s.hidden = s.id !== `s-${name}`; });
@@ -71,6 +74,7 @@
     invalid_activity: 'Please write the name of each activity (2 to 60 characters).',
     invalid_room: 'The classroom name is too long.',
     invalid_groups: 'Please choose your number of groups.',
+    invalid_group_names: 'Please write the name of each group (up to 40 characters).',
   };
 
   function messageFor(error) {
@@ -99,12 +103,14 @@
     const actividades = activities.values();
     const salon = $('t-room').value.trim().replace(/\s+/g, ' ');
     const grupos = Number($('t-groups').value);
+    const nombresGrupos = groupNames.values();
     const password = $('t-password').value;
 
     if (nombre.length < 3 || !nombre.includes(' ')) return setAlert('form-error', 'Please write your full name (first and last name).');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setAlert('form-error', 'Please check your email address.');
     if (!actividades.length) return setAlert('form-error', 'Please write the name of your activity.');
     if (actividades.some((a) => a.length < 2)) return setAlert('form-error', 'Each activity name needs at least 2 characters.');
+    if (nombresGrupos.some((g) => !g)) return setAlert('form-error', grupos === 1 ? 'Please write the name of your group.' : 'Please write the name of each group.');
     if (password.length < 8) return setAlert('form-error', 'Your password must have at least 8 characters.');
     if (password !== $('t-password2').value) return setAlert('form-error', "The two passwords don't match.");
     setAlert('form-error', '');
@@ -120,6 +126,7 @@
 
       const { data, error } = await db.rpc('registrar_profesor', {
         p_codigo: code, p_nombre: nombre, p_actividades: actividades, p_salon: salon, p_grupos: grupos,
+        p_nombres_grupos: nombresGrupos,
       });
       if (error) {
         if ((error.message || '').includes('invalid_code')) return showInvalid();

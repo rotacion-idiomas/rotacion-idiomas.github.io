@@ -3,7 +3,7 @@
 // everyone (with filters) and manages teachers and invitation links.
 (function () {
   const { createDb, formatDate, formatTime, formatDateTimePlain, escapeHtml, friendlyError,
-    fillBranding, activityInputs, fillGroupCount, cfg } = window.App;
+    fillBranding, activityInputs, fillGroupCount, groupNameInputs, groupName, cfg } = window.App;
 
   const db = createDb();
   const PDF_LIBS = [
@@ -126,7 +126,7 @@
         fetchAll('actividades', 'id, nombre, salon, profesor, orden, profesor_id, activa', 'orden'),
         fetchAll('estudiantes', 'codigo, nombre, profesor_id, grupo, creado_en', 'codigo'),
         fetchAll('asistencias', 'id, estudiante_codigo, actividad_id, registrado_en, foto_path', 'id'),
-        fetchAll('profesores', 'id, email, nombre, grupos, es_admin, creado_en', 'creado_en'),
+        fetchAll('profesores', 'id, email, nombre, grupos, nombres_grupos, es_admin, creado_en', 'creado_en'),
       ]);
       state.activities = activities;
       state.teachers = teachers;
@@ -179,7 +179,7 @@
     const options = [['visited', own ? 'Everyone who did my activity' : `Everyone who did ${name}'s activity`]];
     if (teacher.grupos > 1) {
       options.push(['mine', `${mine} – all groups`]);
-      for (let g = 1; g <= teacher.grupos; g++) options.push([`g${g}`, `${mine} – Group ${g}`]);
+      for (let g = 1; g <= teacher.grupos; g++) options.push([`g${g}`, `${mine} – ${groupName(teacher, g)}`]);
     } else {
       options.push(['mine', mine]);
     }
@@ -252,7 +252,7 @@
 
   function groupOf(student) {
     const teacher = teacherById(student.profesor_id);
-    return teacher && teacher.grupos > 1 ? `Group ${student.grupo}` : '';
+    return teacher && teacher.grupos > 1 ? groupName(teacher, student.grupo) : '';
   }
 
   function matches(student, query) {
@@ -634,6 +634,7 @@
 
   // Add (new account) or edit (name, classroom, groups, activities).
   let editing = null;
+  const groupNames = groupNameInputs($('tm-group-names'), $('tm-groups'), 'tm-group');
   const newActivities = activityInputs($('tm-activities'), $('tm-add-activity'), 'tm-activity');
 
   function openTeacherModal(teacher) {
@@ -652,6 +653,7 @@
     $('tm-new-activities').hidden = !!teacher;
     $('tm-room').value = room ? room.salon : '';
     fillGroupCount($('tm-groups'), teacher ? teacher.grupos : 1);
+    groupNames.reset(teacher ? teacher.nombres_grupos : []);
     $('tm-manage').hidden = !teacher;
     if (teacher) renderActivityManager($('tm-activity-manager'), teacher);
     $('tm-password').value = '';
@@ -703,7 +705,8 @@
     invalid_activity: 'Please write the name of each activity (2 to 60 characters).',
     invalid_room: 'The classroom name is too long.',
     invalid_groups: 'Please choose the number of groups.',
-    groups_in_use: 'Some students already chose a higher group number. Choose more groups.',
+    groups_in_use: 'Some students already chose a group that would disappear. Keep more groups.',
+    invalid_group_names: 'Please write the name of each group (up to 40 characters).',
     too_many_activities: 'A teacher can have up to 10 activities.',
     last_activity: 'A teacher needs at least one activity.',
     already_teacher: 'This email is already registered as a teacher.',
@@ -715,7 +718,7 @@
   }
 
   // A new account is created with a separate client, so the administrator stays signed in.
-  async function createTeacher(nombre, email, actividades, salon, grupos, password) {
+  async function createTeacher(nombre, email, actividades, salon, grupos, nombresGrupos, password) {
     const invite = await db.rpc('crear_invitacion', { p_nota: `Added by the administrator: ${nombre}` });
     if (invite.error) throw invite.error;
     const temp = createDb({ auth: { persistSession: false, autoRefreshToken: false, storageKey: 'rotation-new-teacher' } });
@@ -732,6 +735,7 @@
     if (!up.data.session) return 'The account needs email confirmation. Turn off "Confirm email" in Supabase.';
     const reg = await temp.rpc('registrar_profesor', {
       p_codigo: invite.data.codigo, p_nombre: nombre, p_actividades: actividades, p_salon: salon, p_grupos: grupos,
+      p_nombres_grupos: nombresGrupos,
     });
     await temp.auth.signOut({ scope: 'local' });
     if (!reg.error) return '';
@@ -746,6 +750,7 @@
     const actividades = newActivities.values();
     const salon = $('tm-room').value.trim().replace(/\s+/g, ' ');
     const grupos = Number($('tm-groups').value);
+    const nombresGrupos = groupNames.values();
     const password = $('tm-password').value;
 
     if (nombre.length < 3) return setAlert('tm-error', 'Please write the full name.');
@@ -753,6 +758,7 @@
     if (!editing && !actividades.length) return setAlert('tm-error', 'Please write the name of the activity.');
     if (!editing && actividades.some((a) => a.length < 2)) return setAlert('tm-error', 'Each activity name needs at least 2 characters.');
     if (!editing && password.length < 8) return setAlert('tm-error', 'The password must have at least 8 characters.');
+    if (nombresGrupos.some((g) => !g)) return setAlert('tm-error', 'Please write the name of each group.');
 
     const submit = $('tm-submit');
     submit.disabled = true;
@@ -761,11 +767,11 @@
       let message = '';
       if (editing) {
         const { error } = await db.rpc('admin_editar_profesor', {
-          p_email: editing.email, p_nombre: nombre, p_salon: salon, p_grupos: grupos,
+          p_email: editing.email, p_nombre: nombre, p_salon: salon, p_grupos: grupos, p_nombres_grupos: nombresGrupos,
         });
         if (error) message = rpcMessage(error);
       } else {
-        message = await createTeacher(nombre, email, actividades, salon, grupos, password);
+        message = await createTeacher(nombre, email, actividades, salon, grupos, nombresGrupos, password);
       }
       if (message) return setAlert('tm-error', message);
       submit.disabled = false;
@@ -1312,7 +1318,7 @@
       const now = new Date();
       decoratePages(doc, logo, `${formatDate(now)}, ${formatTime(now)}`);
       const day = formatDateTimePlain(now).slice(0, 10);
-      const suffix = { visited: 'activity', mine: 'students' }[v.scope] || v.scope.replace('g', 'group-');
+      const suffix = { visited: 'activity', mine: 'students' }[v.scope] || fileSafe(groupName(v.teacher, Number(v.scope.slice(1))));
       const who = v.teacher ? `${fileSafe(nameOf(v.teacher))}-${suffix}` : 'All-teachers';
       doc.save(`${fileSafe(cfg.EVENT_TITLE)}-${who}-${day}.pdf`);
 

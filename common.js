@@ -92,8 +92,42 @@
     select.value = String(value || 1);
   }
 
+  // One name per group (e.g. its level), as many as the "number of groups" select says.
+  function groupNameInputs(container, countSelect, idPrefix) {
+    const typed = [];
+
+    function render() {
+      container.querySelectorAll('input').forEach((input, i) => { typed[i] = input.value; });
+      const count = Number(countSelect.value) || 1;
+      container.innerHTML = Array.from({ length: count }, (_, i) => `
+        <input class="input" id="${idPrefix}-${i}" autocomplete="off" maxlength="40"
+          placeholder="${count === 1 ? 'e.g. English 3 – Morning' : `Name of group ${i + 1}`}"
+          aria-label="${count === 1 ? 'Name of your group' : `Name of group ${i + 1}`}">`).join('');
+      container.querySelectorAll('input').forEach((input, i) => { input.value = typed[i] || ''; });
+    }
+
+    countSelect.addEventListener('change', render);
+
+    return {
+      values: () => [...container.querySelectorAll('input')].map((i) => i.value.trim().replace(/\s+/g, ' ')),
+      reset(names) {
+        typed.length = 0;
+        (names || []).forEach((n, i) => { typed[i] = n; });
+        container.innerHTML = '';
+        render();
+      },
+    };
+  }
+
+  // The name the teacher gave the group, or "Group 2".
+  function groupName(teacher, number) {
+    const names = (teacher && teacher.nombres_grupos) || [];
+    return names[number - 1] || `Group ${number}`;
+  }
+
   window.App = {
     cfg, createDb, formatDate, formatTime, formatDateTimePlain, escapeHtml, friendlyError,
     storageGet, storageSet, storageRemove, fillBranding, activityInputs, fillGroupCount,
+    groupNameInputs, groupName,
   };
 })();

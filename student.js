@@ -1,7 +1,7 @@
 // Student check-in page.
 (function () {
   const { createDb, formatDate, formatTime, escapeHtml, friendlyError,
-    storageGet, storageSet, storageRemove, fillBranding } = window.App;
+    storageGet, storageSet, storageRemove, fillBranding, groupName } = window.App;
 
   const db = createDb({ auth: { persistSession: false, autoRefreshToken: false } });
   const STUDENT_KEY = 'rotation.student';
@@ -256,18 +256,18 @@
     const current = Number(select.value);
     $('f-group-field').hidden = !teacher;
     select.innerHTML = (groups > 1 ? '<option value="">Choose your group…</option>' : '')
-      + Array.from({ length: groups }, (_, i) => `<option value="${i + 1}">Group ${i + 1}</option>`).join('');
+      + Array.from({ length: groups }, (_, i) => `<option value="${i + 1}">${escapeHtml(groupName(teacher, i + 1))}</option>`).join('');
     if (groups === 1) select.value = '1';
     else select.value = current && current <= groups ? String(current) : '';
     $('f-group-hint').textContent = groups > 1
-      ? 'Your teacher has more than one group. Ask them which number is yours.'
+      ? 'Choose the group (level) you are enrolled in.'
       : 'Your teacher has only one group.';
   }
   $('f-teacher').addEventListener('change', fillGroupSelect);
 
   function groupLabel(student) {
     const teacher = teacherById(student.profesor_id);
-    return teacher && teacher.grupos > 1 ? ` · Group ${student.grupo}` : '';
+    return teacher && teacher.grupos > 1 ? ` · ${groupName(teacher, student.grupo)}` : '';
   }
 
   async function register(nombre, profesor, grupo, confirmed, button) {
@@ -669,8 +669,10 @@
     ctx.restore();
   }
 
-  // Activity name, student and time at the bottom of the photo.
+  // Activity name and the student's group, then the student and time, at the bottom of the photo.
   function drawStamp(ctx, width, height, activity) {
+    const student = state.student;
+    const group = student ? groupName(teacherById(student.profesor_id), student.grupo || 1) : '';
     const pad = Math.round(width * 0.03);
     const big = Math.round(width * 0.042);
     const small = Math.round(width * 0.032);
@@ -681,9 +683,9 @@
     ctx.fillStyle = '#fff';
     ctx.textBaseline = 'top';
     ctx.font = `bold ${big}px Arial, Helvetica, sans-serif`;
-    ctx.fillText(`👑 ${activity.nombre}`, pad, height - band + pad, width - pad * 2);
+    ctx.fillText(`👑 ${activity.nombre}${group ? ` · ${group}` : ''}`, pad, height - band + pad, width - pad * 2);
     ctx.font = `${small}px Arial, Helvetica, sans-serif`;
-    ctx.fillText(`${state.student ? state.student.nombre : ''} · ${formatDate(now)}, ${formatTime(now)}`,
+    ctx.fillText(`${student ? student.nombre : ''} · ${formatDate(now)}, ${formatTime(now)}`,
       pad, height - band + pad * 1.5 + big, width - pad * 2);
   }
 
