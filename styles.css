@@ -120,6 +120,8 @@ a { color: var(--green); }
 .btn:disabled { opacity: .6; cursor: default; }
 .btn-secondary { background: #fff; color: var(--green); }
 .btn-secondary:hover:not(:disabled) { background: var(--green-soft); color: var(--green-dark); }
+.btn-danger { color: #B3261E; border-color: #B3261E; }
+.btn-danger:hover:not(:disabled) { background: #FCEBEA; color: #8C1D18; border-color: #8C1D18; }
 .btn-small { width: auto; min-height: 44px; font-size: 15px; padding: 8px 16px; }
 
 .link-btn {

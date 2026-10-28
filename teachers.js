@@ -261,7 +261,7 @@
     const v = currentView();
     const total = state.activities.length;
     const showTeacher = !v.teacher;
-    const columns = 4 + (showTeacher ? 1 : 0) + (v.focus ? 1 : 0) + v.others.length;
+    const columns = 4 + (showTeacher ? 1 : 0) + (v.focus ? 1 : 0) + v.others.length + (state.isAdmin ? 1 : 0);
 
     $('students-head').innerHTML = `<tr>
       <th>Student</th><th>Student ID</th>
@@ -269,6 +269,7 @@
       ${v.focus ? `<th class="mine">${escapeHtml(v.focus.nombre)} · photo</th>` : ''}
       ${v.others.map((a) => `<th class="c">${escapeHtml(a.nombre)}</th>`).join('')}
       <th class="c">Done</th><th>Status</th>
+      ${state.isAdmin ? '<th></th>' : ''}
     </tr>`;
 
     const query = $('search').value.trim();
@@ -311,6 +312,7 @@
         <td>${complete
           ? '<span class="badge badge-done">Complete</span>'
           : '<span class="badge badge-pending">Incomplete</span>'}</td>
+        ${state.isAdmin ? `<td><button class="btn btn-secondary btn-small btn-danger" type="button" data-delete-student="${escapeHtml(s.codigo)}">Delete</button></td>` : ''}
       </tr>`;
     }).join('');
 
@@ -379,7 +381,7 @@
           ${activity ? `<button class="btn btn-small" type="button" data-see="${escapeHtml(activity.id)}">See results</button>` : ''}
           <button class="btn btn-secondary btn-small" type="button" data-edit="${escapeHtml(t.email)}">Edit</button>
           <a class="btn btn-secondary btn-small" href="qr.html${activity ? `?activity=${encodeURIComponent(activity.id)}` : ''}" target="_blank" rel="noopener">QR code</a>
-          <button class="btn btn-secondary btn-small" type="button" data-delete="${escapeHtml(t.email)}">Delete</button>
+          <button class="btn btn-secondary btn-small btn-danger" type="button" data-delete="${escapeHtml(t.email)}">Delete</button>
         </div>
       </div>`;
     }).join('');
@@ -594,6 +596,26 @@
     if (error) return setAlert('invite-error', friendlyError(error));
     state.invites = state.invites.filter((inv) => inv.codigo !== cancel.dataset.cancel);
     renderInvites();
+  });
+
+  // ---------------------------------------------------------------- delete a student (administrator)
+  $('students-rows').addEventListener('click', async (e) => {
+    const button = e.target.closest('[data-delete-student]');
+    if (!button || !armed(button, 'Tap again to delete')) return;
+    const code = button.dataset.deleteStudent;
+    const photos = state.attendance.filter((a) => a.estudiante_codigo === code).map((a) => a.foto_path);
+    button.disabled = true;
+    const { error } = await db.rpc('admin_eliminar_estudiante', { p_codigo: code });
+    if (error) {
+      button.disabled = false;
+      return setAlert('dash-error', friendlyError(error));
+    }
+    if (photos.length) {
+      const removed = await db.storage.from('evidencias').remove(photos);
+      if (removed.error) console.error(removed.error);
+    }
+    setAlert('dash-error', '');
+    loadData();
   });
 
   // ---------------------------------------------------------------- lightbox
