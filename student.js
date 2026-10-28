@@ -371,8 +371,9 @@
     show('photo');
   }
 
-  $('btn-take').addEventListener('click', openCamera);
-  $('btn-retake').addEventListener('click', openCamera);
+  // On an activity's screen, the selfie must show that activity's QR code.
+  $('btn-take').addEventListener('click', () => openCamera(state.activity));
+  $('btn-retake').addEventListener('click', () => openCamera(state.activity));
 
   function loadImage(file) {
     return new Promise((resolve, reject) => {
@@ -517,6 +518,7 @@
     frame: 0,             // requestAnimationFrame id
     qrTimer: null,
     readQr: null,         // async (image) => text or null
+    expected: null,       // the activity the student is in, or null when the QR code picks it ("Next activity")
     detector: null,       // MediaPipe face detector, once loaded
     faceless: false,      // the face detector couldn't load: the crown goes on top, without tracking
     face: null,           // smoothed { x, y, size, angle } in video pixels
@@ -694,6 +696,10 @@
     } catch { /* not a URL */ }
     const activity = activityById(id);
     if (!activity) return { error: "That QR code isn't from the Activity Rotation." };
+    // Inside an activity, only its own QR code counts.
+    if (cam.expected && activity.id !== cam.expected.id) {
+      return { error: `That's the QR code of ${activity.nombre}. Show the one for ${cam.expected.nombre}.` };
+    }
     if (state.student && recordWith(activity.profesor_id)) {
       const teacher = teacherById(activity.profesor_id);
       return { error: `You already did ${teacher ? `${teacher.nombre}'s` : 'this teacher\'s'} activity.` };
@@ -783,7 +789,8 @@
     $('camera-fallback').hidden = false;
   }
 
-  async function openCamera() {
+  async function openCamera(expected) {
+    cam.expected = expected || null;
     $('camera').hidden = false;
     document.body.style.overflow = 'hidden';
     Object.assign(cam, { face: null, qr: null, problem: '', ready: false, openedAt: Date.now() });
@@ -906,7 +913,8 @@
     }
   });
 
-  document.querySelectorAll('[data-scan]').forEach((b) => b.addEventListener('click', openCamera));
+  // "Next activity" and similar: the QR code in the selfie picks the activity.
+  document.querySelectorAll('[data-scan]').forEach((b) => b.addEventListener('click', () => openCamera(null)));
   $('camera-close').addEventListener('click', closeCamera);
   $('camera-cancel').addEventListener('click', closeCamera);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('camera').hidden) closeCamera(); });
