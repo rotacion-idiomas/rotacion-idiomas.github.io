@@ -190,6 +190,12 @@
     return state.isAdmin ? teacherById(Number($('f-teacher').value)) : state.me;
   }
 
+  // A teacher starts with everyone who did their activity; the administrator,
+  // after choosing a teacher, with the students who chose that teacher.
+  function defaultScope() {
+    return state.isAdmin ? 'mine' : 'visited';
+  }
+
   function fillScope(select, field, value) {
     const teacher = viewTeacher();
     field.hidden = !teacher;
@@ -199,7 +205,7 @@
     }
     const options = scopeOptions(teacher);
     select.innerHTML = options.map(([v, label]) => `<option value="${v}">${escapeHtml(label)}</option>`).join('');
-    select.value = options.some(([v]) => v === value) ? value : 'visited';
+    select.value = options.some(([v]) => v === value) ? value : defaultScope();
   }
 
   function currentView(scope = $('f-show').value) {
@@ -220,7 +226,7 @@
   }
 
   function scopeLabel(v) {
-    if (!v.teacher) return 'Every student';
+    if (!v.teacher) return 'All teachers, every student';
     const option = scopeOptions(v.teacher).find(([value]) => value === v.scope);
     return option ? option[1] : '';
   }
@@ -253,6 +259,15 @@
     if (!query) return true;
     const q = query.toLowerCase();
     return student.nombre.toLowerCase().includes(q) || student.codigo.toLowerCase().includes(q);
+  }
+
+  // The students on screen (and in the PDF): the view, the search and "haven't finished".
+  function listed(v) {
+    const query = $('search').value.trim();
+    const onlyIncomplete = $('only-incomplete').checked;
+    return v.students
+      .filter((s) => matches(s, query))
+      .filter((s) => !onlyIncomplete || !isComplete(s));
   }
 
   function summary(v) {
@@ -332,7 +347,7 @@
   }
 
   $('f-teacher').addEventListener('change', () => {
-    fillScope($('f-show'), $('f-show-field'), 'visited');
+    fillScope($('f-show'), $('f-show-field'), defaultScope());
     render();
   });
   $('f-show').addEventListener('change', render);
@@ -367,11 +382,7 @@
       ${state.isAdmin ? '<th></th>' : ''}
     </tr>`;
 
-    const query = $('search').value.trim();
-    const onlyIncomplete = $('only-incomplete').checked;
-    const rows = v.students
-      .filter((s) => matches(s, query))
-      .filter((s) => !onlyIncomplete || !isComplete(s));
+    const rows = listed(v);
 
     const tbody = $('students-rows');
     if (!rows.length) {
@@ -587,7 +598,7 @@
     const see = e.target.closest('[data-see]');
     if (see) {
       $('f-teacher').value = see.dataset.see;
-      fillScope($('f-show'), $('f-show-field'), 'visited');
+      fillScope($('f-show'), $('f-show-field'), defaultScope());
       selectTab('results');
       render();
       return;
@@ -1187,7 +1198,7 @@
       details.push(`${activities.length === 1 ? 'Activity' : 'Activities'}: ${activities.join(', ')}`);
       details.push(`${scopeLabel(v)}: ${n} ${n === 1 ? 'student' : 'students'}`);
     } else {
-      details.push(`${state.stations.length} teachers  |  ${n} students registered`);
+      details.push(`${state.stations.length} teachers  |  ${n} ${n === 1 ? 'student' : 'students'}`);
     }
 
     let y = titleBlock(doc, PAGE.top, v.teacher ? 'Attendance report · Teacher' : 'Attendance report',
@@ -1201,21 +1212,55 @@
     return pdfText(text).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '');
   }
 
-  // Dialog
+  // Dialog: the same filters as the screen; changing them here changes the screen too.
+  function reportView() {
+    const v = currentView();
+    return { ...v, students: listed(v) };
+  }
+
   function describePdf() {
-    const v = currentView($('pdf-scope').value);
+    const v = reportView();
     const n = v.students.length;
-    $('pdf-desc').textContent = `${scopeLabel(v)} (${n} ${n === 1 ? 'student' : 'students'}), with the activity they did with each teacher and whether they finished.`;
+    const parts = [scopeLabel(v)];
+    if ($('only-incomplete').checked) parts.push('only those who haven\'t finished');
+    const query = $('search').value.trim();
+    if (query) parts.push(`matching "${query}"`);
+    $('pdf-desc').textContent = `${parts.join(', ')}: ${n} ${n === 1 ? 'student' : 'students'}.`;
+  }
+
+  function fillPdfFilters() {
+    if (state.isAdmin) {
+      $('pdf-teacher').innerHTML = $('f-teacher').innerHTML;
+      $('pdf-teacher').value = $('f-teacher').value;
+    }
+    fillScope($('pdf-scope'), $('pdf-scope-field'), $('f-show').value);
+    $('pdf-incomplete').checked = $('only-incomplete').checked;
+    describePdf();
   }
 
   function openPdfDialog() {
-    fillScope($('pdf-scope'), $('pdf-scope-field'), $('f-show').value);
-    describePdf();
+    fillPdfFilters();
     setAlert('pdf-error', '');
     $('pdf-status').textContent = '';
     $('pdf-modal').hidden = false;
   }
-  $('pdf-scope').addEventListener('change', describePdf);
+
+  $('pdf-teacher').addEventListener('change', () => {
+    $('f-teacher').value = $('pdf-teacher').value;
+    fillScope($('f-show'), $('f-show-field'), defaultScope());
+    render();
+    fillPdfFilters();
+  });
+  $('pdf-scope').addEventListener('change', () => {
+    $('f-show').value = $('pdf-scope').value;
+    render();
+    describePdf();
+  });
+  $('pdf-incomplete').addEventListener('change', () => {
+    $('only-incomplete').checked = $('pdf-incomplete').checked;
+    render();
+    describePdf();
+  });
 
   function closePdfDialog() {
     if ($('pdf-submit').disabled) return;
@@ -1229,7 +1274,7 @@
 
   $('pdf-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const v = currentView($('pdf-scope').value);
+    const v = reportView();
     const submit = $('pdf-submit');
     submit.disabled = true;
     $('pdf-cancel').disabled = true;

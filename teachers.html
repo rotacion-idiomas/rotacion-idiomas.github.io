@@ -151,11 +151,17 @@
   <div class="modal" id="pdf-modal" role="dialog" aria-modal="true" aria-labelledby="pdf-title" hidden>
     <form class="modal-card" id="pdf-form">
       <h2 id="pdf-title">Download PDF report</h2>
+      <p class="muted" style="margin-top:-6px">The report has the same students you see on the screen. You can change the filters here.</p>
+      <div class="field" data-admin-only hidden>
+        <label for="pdf-teacher">Teacher</label>
+        <select class="select" id="pdf-teacher"></select>
+      </div>
       <div class="field" id="pdf-scope-field" hidden>
-        <label for="pdf-scope">Students in the report</label>
+        <label for="pdf-scope">Students</label>
         <select class="select" id="pdf-scope"></select>
       </div>
-      <p class="muted" style="margin-top:-6px" id="pdf-desc"></p>
+      <label class="check" style="min-height:auto"><input type="checkbox" id="pdf-incomplete"> <span>Only students who haven't finished</span></label>
+      <div class="alert alert-success"><span class="alert-icon">⬇</span><div id="pdf-desc"></div></div>
 
       <label class="check" style="min-height:auto"><input type="checkbox" id="pdf-photos" checked> <span>Include the photos of every activity</span></label>
 
