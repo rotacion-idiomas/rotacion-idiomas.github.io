@@ -427,6 +427,25 @@ tr.is-incomplete td:first-child { box-shadow: inset 4px 0 0 var(--gold); }
 .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: bold; white-space: nowrap; }
 .badge-done { background: var(--green-soft); color: var(--green-dark); }
 .badge-pending { background: var(--gold-soft); color: #7A5D00; }
+.badge-off { background: var(--bg-alt); color: var(--text-2); }
+.small { font-size: 13px; }
+.cell-meta { display: grid; gap: 2px; font-size: 13px; min-width: 70px; }
+.cell-meta .yes { font-size: 15px; }
+
+/* Activities: the teacher's list (one active), and the sign-up inputs */
+.my-activities { margin-top: 20px; display: grid; gap: 14px; }
+.act-manager { display: grid; gap: 10px; }
+.act-row {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; background: #fff;
+}
+.act-row.is-active { border-color: var(--green); background: var(--green-soft); }
+.act-row > .input { flex: 1 1 200px; }
+.act-row .badge { margin-left: 6px; }
+.activity-inputs { display: grid; gap: 8px; }
+.activity-input { display: flex; gap: 8px; }
+.activity-input .input { flex: 1; min-width: 0; }
+.activity-input .btn { min-height: 52px; font-size: 20px; }
 
 .admin-tabs { display: inline-grid; grid-auto-flow: column; grid-template-columns: none; margin-top: 20px; }
 .admin-tabs .tab { padding: 0 20px; }

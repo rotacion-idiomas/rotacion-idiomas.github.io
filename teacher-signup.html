@@ -39,7 +39,7 @@
     <section class="screen" id="s-form" hidden>
       <div>
         <h2>Create your teacher account</h2>
-        <p class="lead" style="margin-top:6px">Your name and activity will appear on your classroom's QR code and in the students' list of teachers.</p>
+        <p class="lead" style="margin-top:6px">Your name and activities will appear on your classroom's QR codes and in the students' list of teachers.</p>
       </div>
 
       <div class="alert alert-error" id="form-error" role="alert" hidden>
@@ -57,12 +57,19 @@
           <span class="hint">You'll use it to sign in to your dashboard.</span>
         </div>
         <div class="field">
-          <label for="t-activity">Name of your activity</label>
-          <input class="input" id="t-activity" autocomplete="off" required maxlength="60" placeholder="e.g. Creative Writing">
+          <label for="t-activity-0">Your activities</label>
+          <div class="activity-inputs" id="t-activities"></div>
+          <button class="link-btn" id="t-add-activity" type="button">＋ Add another activity</button>
+          <span class="hint">If you teach a different activity at another time of the day, add it here. Only one is active (open to students) at a time: the first one starts active, and you can switch from your dashboard.</span>
         </div>
         <div class="field">
           <label for="t-room">Classroom <span class="muted" style="font-weight:normal">(optional)</span></label>
           <input class="input" id="t-room" autocomplete="off" maxlength="40" placeholder="e.g. Room 305">
+        </div>
+        <div class="field">
+          <label for="t-groups">Number of groups</label>
+          <select class="select" id="t-groups"></select>
+          <span class="hint">If you have more than one group, your students will choose theirs (Group 1, Group 2…) when they register. Tell each group which number it is.</span>
         </div>
         <div class="field">
           <label for="t-password">Password</label>
@@ -86,7 +93,7 @@
         <p class="lead" style="margin-top:6px" id="done-text"></p>
       </div>
       <a class="btn" href="teachers.html">Go to my dashboard</a>
-      <a class="btn btn-secondary" id="done-qr" href="qr.html">🖨 Print my QR code</a>
+      <a class="btn btn-secondary" id="done-qr" href="qr.html">🖨 Print my QR codes</a>
     </section>
   </main>
 

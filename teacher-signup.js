@@ -1,11 +1,14 @@
-// Teacher sign-up: creates the account, the activity, and links them.
+// Teacher sign-up: creates the account and the teacher's activities.
 (function () {
-  const { createDb, escapeHtml, friendlyError, fillBranding } = window.App;
+  const { createDb, escapeHtml, friendlyError, fillBranding, activityInputs, fillGroupCount } = window.App;
 
   const db = createDb();
   const code = (new URLSearchParams(location.search).get('code') || '').trim();
 
   const $ = (id) => document.getElementById(id);
+  const activities = activityInputs($('t-activities'), $('t-add-activity'), 't-activity');
+  activities.reset();
+  fillGroupCount($('t-groups'), 1);
 
   function show(name) {
     document.querySelectorAll('.screen').forEach((s) => { s.hidden = s.id !== `s-${name}`; });
@@ -65,8 +68,9 @@
     validation_failed: 'Please check your email address.',
     already_teacher: 'This email already has a teacher account. Tap "Sign in" below to open your dashboard.',
     invalid_name: 'Please write your full name.',
-    invalid_activity: 'Please write the name of your activity (2 to 60 characters).',
+    invalid_activity: 'Please write the name of each activity (2 to 60 characters).',
     invalid_room: 'The classroom name is too long.',
+    invalid_groups: 'Please choose your number of groups.',
   };
 
   function messageFor(error) {
@@ -92,13 +96,15 @@
     e.preventDefault();
     const nombre = $('t-name').value.trim().replace(/\s+/g, ' ');
     const email = $('t-email').value.trim().toLowerCase();
-    const actividad = $('t-activity').value.trim().replace(/\s+/g, ' ');
+    const actividades = activities.values();
     const salon = $('t-room').value.trim().replace(/\s+/g, ' ');
+    const grupos = Number($('t-groups').value);
     const password = $('t-password').value;
 
     if (nombre.length < 3 || !nombre.includes(' ')) return setAlert('form-error', 'Please write your full name (first and last name).');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setAlert('form-error', 'Please check your email address.');
-    if (actividad.length < 2) return setAlert('form-error', 'Please write the name of your activity.');
+    if (!actividades.length) return setAlert('form-error', 'Please write the name of your activity.');
+    if (actividades.some((a) => a.length < 2)) return setAlert('form-error', 'Each activity name needs at least 2 characters.');
     if (password.length < 8) return setAlert('form-error', 'Your password must have at least 8 characters.');
     if (password !== $('t-password2').value) return setAlert('form-error', "The two passwords don't match.");
     setAlert('form-error', '');
@@ -113,7 +119,7 @@
       }
 
       const { data, error } = await db.rpc('registrar_profesor', {
-        p_codigo: code, p_nombre: nombre, p_actividad: actividad, p_salon: salon,
+        p_codigo: code, p_nombre: nombre, p_actividades: actividades, p_salon: salon, p_grupos: grupos,
       });
       if (error) {
         if ((error.message || '').includes('invalid_code')) return showInvalid();
@@ -121,8 +127,11 @@
         return setAlert('form-error', messageFor(error));
       }
 
-      $('done-text').textContent = `${data.actividad}${data.salon ? ` (${data.salon})` : ''} is now part of the rotation, with ${data.profesor} as its teacher.`;
-      $('done-qr').href = `qr.html?activity=${encodeURIComponent(data.actividad_id)}`;
+      const n = data.actividades.length;
+      $('done-text').textContent = n === 1
+        ? `${data.activa}${data.salon ? ` (${data.salon})` : ''} is now part of the rotation, with ${data.profesor} as its teacher.`
+        : `Your ${n} activities are now part of the rotation. ${data.activa} is the active one; you can switch to another one from your dashboard.`;
+      $('done-qr').href = `qr.html?teacher=${encodeURIComponent(data.profesor_id)}`;
       show('done');
     } catch (err) {
       console.error(err);

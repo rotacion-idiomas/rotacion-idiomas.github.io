@@ -51,6 +51,21 @@
       <span class="alert-icon">!</span><div id="dash-error-text"></div>
     </div>
 
+    <!-- Teacher: their activities (only one is open to students at a time) -->
+    <section class="card my-activities" id="p-mine" hidden>
+      <div class="panel-head">
+        <div>
+          <h2 class="section-title">My activities</h2>
+          <p class="muted">Students can only check in to your <strong>active</strong> activity. When you start teaching another one, activate it here and post its QR code at the door.</p>
+        </div>
+        <a class="btn btn-secondary btn-small" id="mine-qr" href="qr.html" target="_blank" rel="noopener">🖨 My QR codes</a>
+      </div>
+      <div class="alert alert-error" id="mine-error" role="alert" hidden>
+        <span class="alert-icon">!</span><div id="mine-error-text"></div>
+      </div>
+      <div class="act-manager" id="mine-activities"></div>
+    </section>
+
     <div class="tabs admin-tabs" role="tablist" id="admin-tabs" hidden>
       <button class="tab" role="tab" type="button" data-tab="results" aria-selected="true">Results</button>
       <button class="tab" role="tab" type="button" data-tab="teachers" aria-selected="false">Teachers</button>
@@ -67,9 +82,9 @@
             <label for="f-teacher">Teacher</label>
             <select class="select" id="f-teacher"></select>
           </div>
-          <div class="field" data-admin-only hidden>
-            <label for="f-activity">Show photos of</label>
-            <select class="select" id="f-activity"></select>
+          <div class="field" id="f-show-field" hidden>
+            <label for="f-show">Students</label>
+            <select class="select" id="f-show"></select>
           </div>
           <div class="field">
             <label for="search">Search student</label>
@@ -96,7 +111,7 @@
       <div class="panel-head">
         <div>
           <h2 class="section-title">Teachers</h2>
-          <p class="muted">Teachers who created their account, with their activity. You can also add one yourself.</p>
+          <p class="muted">Teachers who created their account, with their activities. You can also add one yourself.</p>
         </div>
         <div class="toolbar-actions">
           <a class="btn btn-secondary btn-small" href="qr.html" target="_blank" rel="noopener">🖨 All QR codes</a>
@@ -136,9 +151,13 @@
   <div class="modal" id="pdf-modal" role="dialog" aria-modal="true" aria-labelledby="pdf-title" hidden>
     <form class="modal-card" id="pdf-form">
       <h2 id="pdf-title">Download PDF report</h2>
+      <div class="field" id="pdf-scope-field" hidden>
+        <label for="pdf-scope">Students in the report</label>
+        <select class="select" id="pdf-scope"></select>
+      </div>
       <p class="muted" style="margin-top:-6px" id="pdf-desc"></p>
 
-      <label class="check" style="min-height:auto" id="pdf-photos-label"><input type="checkbox" id="pdf-photos" checked> <span id="pdf-photos-text">Include photo thumbnails</span></label>
+      <label class="check" style="min-height:auto"><input type="checkbox" id="pdf-photos" checked> <span>Include the photos of every activity</span></label>
 
       <div class="alert alert-error" id="pdf-error" role="alert" hidden>
         <span class="alert-icon">!</span><div id="pdf-error-text"></div>
@@ -165,13 +184,24 @@
         <label for="tm-email">Email</label>
         <input class="input" id="tm-email" type="email" autocomplete="off" autocapitalize="off">
       </div>
-      <div class="field">
-        <label for="tm-activity">Name of the activity</label>
-        <input class="input" id="tm-activity" autocomplete="off" maxlength="60">
+      <div class="field" id="tm-new-activities">
+        <label for="tm-activity-0">Activities</label>
+        <div class="activity-inputs" id="tm-activities"></div>
+        <button class="link-btn" id="tm-add-activity" type="button">＋ Add another activity</button>
+        <span class="hint">The first one starts as the active activity.</span>
       </div>
       <div class="field">
         <label for="tm-room">Classroom <span class="muted" style="font-weight:normal">(optional)</span></label>
         <input class="input" id="tm-room" autocomplete="off" maxlength="40">
+      </div>
+      <div class="field">
+        <label for="tm-groups">Number of groups</label>
+        <select class="select" id="tm-groups"></select>
+      </div>
+      <div class="field" id="tm-manage" hidden>
+        <span style="font-weight:bold;font-size:15px">Activities</span>
+        <span class="hint" style="font-size:14px">Only the active activity accepts check-ins. Changes here are saved right away.</span>
+        <div class="act-manager" id="tm-activity-manager"></div>
       </div>
       <div class="field" id="tm-reset" hidden>
         <span style="font-weight:bold;font-size:15px">Password</span>

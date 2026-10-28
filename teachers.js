@@ -1,8 +1,9 @@
-// Dashboard. A teacher sees the students who chose them; the administrator
-// sees everyone (with filters) and manages teachers and invitation links.
+// Dashboard. A teacher sees the students who did their activity or chose
+// them (by group) and manages their activities; the administrator sees
+// everyone (with filters) and manages teachers and invitation links.
 (function () {
   const { createDb, formatDate, formatTime, formatDateTimePlain, escapeHtml, friendlyError,
-    fillBranding, cfg } = window.App;
+    fillBranding, activityInputs, fillGroupCount, cfg } = window.App;
 
   const db = createDb();
   const PDF_LIBS = [
@@ -13,18 +14,20 @@
 
   const state = {
     activities: [],
+    teachers: [],           // rows of 'profesores' (the administrator included)
+    stations: [],           // teachers with activities: one column each, sorted by name
     students: [],           // every student the account can see
     attendance: [],
-    byStudent: new Map(),   // codigo -> Map(actividad_id -> attendance)
+    byStudent: new Map(),   // codigo -> Map(profesor_id -> attendance)
     photoUrls: new Map(),   // foto_path -> signed URL
     email: '',
-    myActivity: null,       // activity of the signed-in teacher
+    me: null,               // row of the signed-in teacher
     isTeacher: false,       // accounts not in 'profesores' can't see students
     isAdmin: false,
-    teachers: [],           // administrator: rows of 'profesores'
     invites: [],
     newInvite: null,
     tab: 'results',
+    renaming: null,         // id of the activity being renamed
   };
 
   const $ = (id) => document.getElementById(id);
@@ -40,6 +43,22 @@
 
   function activityById(id) {
     return state.activities.find((a) => a.id === id) || null;
+  }
+
+  function teacherById(id) {
+    return state.teachers.find((t) => t.id === id) || null;
+  }
+
+  function nameOf(teacher) {
+    return teacher.nombre || teacher.email;
+  }
+
+  function activitiesOf(teacher) {
+    return state.activities.filter((a) => a.profesor_id === teacher.id);
+  }
+
+  function activeActivity(teacher) {
+    return state.activities.find((a) => a.profesor_id === teacher.id && a.activa) || null;
   }
 
   // ---------------------------------------------------------------- auth
@@ -103,33 +122,32 @@
     const button = $('btn-refresh');
     button.disabled = true;
     try {
-      const [activities, students, attendance, mine] = await Promise.all([
-        fetchAll('actividades', 'id, nombre, salon, profesor, orden', 'orden'),
-        fetchAll('estudiantes', 'codigo, nombre, profesor_actividad, creado_en', 'codigo'),
+      const [activities, students, attendance, teachers] = await Promise.all([
+        fetchAll('actividades', 'id, nombre, salon, profesor, orden, profesor_id, activa', 'orden'),
+        fetchAll('estudiantes', 'codigo, nombre, profesor_id, grupo, creado_en', 'codigo'),
         fetchAll('asistencias', 'id, estudiante_codigo, actividad_id, registrado_en, foto_path', 'id'),
-        db.from('profesores').select('actividad_id, es_admin').eq('email', state.email).maybeSingle(),
+        fetchAll('profesores', 'id, email, nombre, grupos, es_admin, creado_en', 'creado_en'),
       ]);
-      if (mine.error) throw mine.error;
       state.activities = activities;
-      state.isTeacher = !!mine.data;
-      state.isAdmin = !!(mine.data && mine.data.es_admin);
-      state.myActivity = state.isAdmin ? null : activityById(mine.data && mine.data.actividad_id);
+      state.teachers = teachers;
+      state.me = teachers.find((t) => t.email === state.email) || null;
+      state.isTeacher = !!state.me;
+      state.isAdmin = !!(state.me && state.me.es_admin);
+      state.stations = teachers.filter((t) => activitiesOf(t).length)
+        .sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'es'));
 
       state.students = students.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
       state.attendance = attendance;
       state.byStudent = new Map(students.map((s) => [s.codigo, new Map()]));
       attendance.forEach((a) => {
-        if (state.byStudent.has(a.estudiante_codigo)) state.byStudent.get(a.estudiante_codigo).set(a.actividad_id, a);
+        const activity = activityById(a.actividad_id);
+        const done = state.byStudent.get(a.estudiante_codigo);
+        if (activity && done && !done.has(activity.profesor_id)) done.set(activity.profesor_id, a);
       });
 
       if (state.isAdmin) {
-        const [teachers, invites] = await Promise.all([
-          db.from('profesores').select('email, nombre, actividad_id, es_admin, creado_en').order('creado_en'),
-          db.from('invitaciones').select('*').order('creada_en', { ascending: false }),
-        ]);
-        if (teachers.error) throw teachers.error;
+        const invites = await db.from('invitaciones').select('*').order('creada_en', { ascending: false });
         if (invites.error) throw invites.error;
-        state.teachers = teachers.data.filter((t) => !t.es_admin);
         state.invites = invites.data;
       }
 
@@ -152,32 +170,83 @@
   $('btn-refresh').addEventListener('click', loadData);
 
   // ---------------------------------------------------------------- what the results show
-  // teacher: whose students; focus: activity shown first, with photos.
-  function currentView() {
-    const teacher = state.isAdmin ? activityById($('f-teacher').value) : state.myActivity;
-    const focus = state.isAdmin ? activityById($('f-activity').value) : state.myActivity;
-    const students = teacher
-      ? state.students.filter((s) => s.profesor_actividad === teacher.id)
-      : state.students;
-    return { teacher, focus, students, others: state.activities.filter((a) => a !== focus) };
+  // Which students, for the teacher in view:
+  //   'visited' everyone who did their activity, 'mine' those who chose them, 'g2' only group 2.
+  function scopeOptions(teacher) {
+    const own = teacher === state.me;
+    const name = nameOf(teacher);
+    const mine = own ? 'My students' : `Students of ${name}`;
+    const options = [['visited', own ? 'Everyone who did my activity' : `Everyone who did ${name}'s activity`]];
+    if (teacher.grupos > 1) {
+      options.push(['mine', `${mine} – all groups`]);
+      for (let g = 1; g <= teacher.grupos; g++) options.push([`g${g}`, `${mine} – Group ${g}`]);
+    } else {
+      options.push(['mine', mine]);
+    }
+    return options;
   }
 
-  function recordOf(student, activity) {
+  function viewTeacher() {
+    return state.isAdmin ? teacherById(Number($('f-teacher').value)) : state.me;
+  }
+
+  function fillScope(select, field, value) {
+    const teacher = viewTeacher();
+    field.hidden = !teacher;
+    if (!teacher) {
+      select.innerHTML = '';
+      return;
+    }
+    const options = scopeOptions(teacher);
+    select.innerHTML = options.map(([v, label]) => `<option value="${v}">${escapeHtml(label)}</option>`).join('');
+    select.value = options.some(([v]) => v === value) ? value : 'visited';
+  }
+
+  function currentView(scope = $('f-show').value) {
+    const teacher = viewTeacher();
+    let students = state.students;
+    if (teacher) {
+      if (scope === 'visited') {
+        students = students.filter((s) => recordOf(s, teacher));
+      } else {
+        const group = scope.startsWith('g') ? Number(scope.slice(1)) : 0;
+        students = students.filter((s) => s.profesor_id === teacher.id && (!group || s.grupo === group));
+      }
+    }
+    // The teacher in view comes first, highlighted.
+    const focus = teacher && state.stations.includes(teacher) ? teacher : null;
+    const columns = focus ? [focus, ...state.stations.filter((t) => t !== focus)] : state.stations;
+    return { teacher, scope: teacher ? scope : '', students, focus, columns };
+  }
+
+  function scopeLabel(v) {
+    if (!v.teacher) return 'Every student';
+    const option = scopeOptions(v.teacher).find(([value]) => value === v.scope);
+    return option ? option[1] : '';
+  }
+
+  function recordOf(student, teacher) {
     const done = state.byStudent.get(student.codigo);
-    return (done && done.get(activity.id)) || null;
+    return (done && done.get(teacher.id)) || null;
   }
 
+  // One activity with each teacher completes the rotation.
   function completedCount(student) {
-    return state.activities.filter((a) => recordOf(student, a)).length;
+    return state.stations.filter((t) => recordOf(student, t)).length;
   }
 
   function isComplete(student) {
-    return state.activities.length > 0 && completedCount(student) >= state.activities.length;
+    return state.stations.length > 0 && completedCount(student) >= state.stations.length;
   }
 
   function teacherOf(student) {
-    const activity = activityById(student.profesor_actividad);
-    return activity ? activity.profesor : '';
+    const teacher = teacherById(student.profesor_id);
+    return teacher ? nameOf(teacher) : '';
+  }
+
+  function groupOf(student) {
+    const teacher = teacherById(student.profesor_id);
+    return teacher && teacher.grupos > 1 ? `Group ${student.grupo}` : '';
   }
 
   function matches(student, query) {
@@ -188,11 +257,12 @@
 
   function summary(v) {
     const finished = v.students.filter(isComplete).length;
+    const own = v.focus && v.focus === state.me;
     const checkIns = v.focus
-      ? [v.students.filter((s) => recordOf(s, v.focus)).length, `Checked in at ${v.focus.nombre}`]
+      ? [v.students.filter((s) => recordOf(s, v.focus)).length, own ? 'Did my activity' : `Did ${nameOf(v.focus)}'s activity`]
       : [v.students.reduce((n, s) => n + completedCount(s), 0), 'Total check-ins'];
     return [
-      [v.students.length, state.isAdmin || !v.teacher ? 'Students' : 'My students'],
+      [v.students.length, 'Students'],
       checkIns,
       [finished, 'Completed all activities'],
       [v.students.length - finished, 'Still in progress'],
@@ -203,71 +273,96 @@
     return `${activity.nombre}${activity.salon ? ` – ${activity.salon}` : ''}`;
   }
 
+  // Columns besides the teachers': the student's teacher, or their group.
+  function extraColumns(v) {
+    return {
+      showTeacher: !v.teacher || v.scope === 'visited',
+      showGroup: !!v.teacher && v.scope === 'mine' && v.teacher.grupos > 1,
+    };
+  }
+
   // ---------------------------------------------------------------- rendering
   function renderHeader() {
-    const mine = state.myActivity;
+    const me = state.me;
+    const teaching = state.isTeacher && !state.isAdmin;
     $('dash-role').textContent = state.isAdmin ? 'Administrator' : 'My students';
     $('admin-tabs').hidden = !state.isAdmin;
+    $('p-mine').hidden = !teaching;
     document.querySelectorAll('[data-admin-only]').forEach((el) => { el.hidden = !state.isAdmin; });
     let info;
-    if (state.isAdmin) info = 'You can see every teacher\'s results and manage the teachers.';
-    else if (mine) info = `<strong>${escapeHtml(mine.profesor)}</strong> · Your activity: ${escapeHtml(withRoom(mine))}`;
-    else if (state.isTeacher) info = 'Your account isn\'t linked to an activity, so you can see <strong>every student</strong>.';
-    else info = 'This account isn\'t registered as a teacher. Please create your account with the sign-up link you received.';
+    if (state.isAdmin) {
+      info = 'You can see every teacher\'s results and manage the teachers.';
+    } else if (teaching) {
+      const active = activeActivity(me);
+      info = `<strong>${escapeHtml(nameOf(me))}</strong> · ${active
+        ? `Active now: ${escapeHtml(withRoom(active))}`
+        : 'You have no active activity yet.'}`;
+      $('mine-qr').href = `qr.html?teacher=${encodeURIComponent(me.id)}`;
+    } else {
+      info = 'This account isn\'t registered as a teacher. Please create your account with the sign-up link you received.';
+    }
     $('teacher-info').innerHTML = info;
     selectTab(state.isAdmin ? state.tab : 'results');
   }
 
   function fillFilters() {
-    if (!state.isAdmin) return;
-    const teacher = $('f-teacher');
-    const activity = $('f-activity');
-    const [t, a] = [teacher.value, activity.value];
-    const byTeacher = [...state.activities].sort((x, y) => x.profesor.localeCompare(y.profesor, 'es'));
-    teacher.innerHTML = '<option value="">All teachers</option>' + byTeacher.map((x) =>
-      `<option value="${escapeHtml(x.id)}">${escapeHtml(x.profesor)}</option>`).join('');
-    activity.innerHTML = '<option value="">No photos (all activities)</option>' + state.activities.map((x) =>
-      `<option value="${escapeHtml(x.id)}">${escapeHtml(withRoom(x))}</option>`).join('');
-    teacher.value = activityById(t) ? t : '';
-    activity.value = activityById(a) ? a : '';
+    if (state.isAdmin) {
+      const select = $('f-teacher');
+      const current = select.value;
+      select.innerHTML = '<option value="">All teachers</option>' + state.stations.map((t) =>
+        `<option value="${t.id}">${escapeHtml(nameOf(t))}</option>`).join('');
+      select.value = state.stations.some((t) => String(t.id) === current) ? current : '';
+    }
+    fillScope($('f-show'), $('f-show-field'), $('f-show').value);
   }
 
   function render() {
     $('stats').innerHTML = summary(currentView()).map(([num, label]) =>
       `<div class="stat"><div class="num">${num}</div><div class="label">${escapeHtml(label)}</div></div>`).join('');
     renderTable();
+    if (state.isTeacher && !state.isAdmin) renderActivityManager($('mine-activities'), state.me);
     if (state.isAdmin) {
       renderTeachers();
       renderInvites();
+      if (editing && !$('teacher-modal').hidden) {
+        editing = state.teachers.find((t) => t.email === editing.email) || editing;
+        renderActivityManager($('tm-activity-manager'), editing);
+      }
     }
   }
 
-  // Choosing a teacher shows their activity's photos, like their own dashboard.
   $('f-teacher').addEventListener('change', () => {
-    $('f-activity').value = $('f-teacher').value;
+    fillScope($('f-show'), $('f-show-field'), 'visited');
     render();
   });
-  $('f-activity').addEventListener('change', render);
+  $('f-show').addEventListener('change', render);
   $('search').addEventListener('input', renderTable);
   $('only-incomplete').addEventListener('change', renderTable);
 
-  function checkCell(record) {
-    return record
-      ? `<td class="c"><span class="yes" title="${escapeHtml(formatDate(record.registrado_en) + ', ' + formatTime(record.registrado_en))}">✓</span></td>`
-      : '<td class="c"><span class="no" title="Not yet">✗</span></td>';
+  // Photo, time and activity of the student's check-in with this teacher.
+  function stationCell(student, teacher, isFocus) {
+    const r = recordOf(student, teacher);
+    const mine = isFocus ? 'mine' : '';
+    if (!r) return `<td class="c ${mine}"><span class="no" title="Not yet">✗</span></td>`;
+    const activity = activityById(r.actividad_id);
+    const name = activity ? activity.nombre : '';
+    return `<td class="${mine}"><div class="photo-cell">
+        <button class="thumb" type="button" data-path="${escapeHtml(r.foto_path)}" aria-label="View photo of ${escapeHtml(student.nombre)} at ${escapeHtml(name)}"><img alt="" loading="lazy" data-src-path="${escapeHtml(r.foto_path)}"></button>
+        <span class="cell-meta"><span class="nowrap"><span class="yes">✓</span> ${formatTime(r.registrado_en)}</span><span class="muted">${escapeHtml(name)}</span></span>
+      </div></td>`;
   }
 
   async function renderTable() {
     const v = currentView();
-    const total = state.activities.length;
-    const showTeacher = !v.teacher;
-    const columns = 4 + (showTeacher ? 1 : 0) + (v.focus ? 1 : 0) + v.others.length + (state.isAdmin ? 1 : 0);
+    const total = state.stations.length;
+    const { showTeacher, showGroup } = extraColumns(v);
+    const columns = 4 + (showTeacher ? 1 : 0) + (showGroup ? 1 : 0) + v.columns.length + (state.isAdmin ? 1 : 0);
 
     $('students-head').innerHTML = `<tr>
       <th>Student</th><th>Student ID</th>
       ${showTeacher ? '<th>Teacher</th>' : ''}
-      ${v.focus ? `<th class="mine">${escapeHtml(v.focus.nombre)} · photo</th>` : ''}
-      ${v.others.map((a) => `<th class="c">${escapeHtml(a.nombre)}</th>`).join('')}
+      ${showGroup ? '<th>Group</th>' : ''}
+      ${v.columns.map((t) => `<th class="${t === v.focus ? 'mine' : 'c'}">${escapeHtml(nameOf(t))}</th>`).join('')}
       <th class="c">Done</th><th>Status</th>
       ${state.isAdmin ? '<th></th>' : ''}
     </tr>`;
@@ -282,9 +377,9 @@
     if (!rows.length) {
       let empty = 'No students match these filters.';
       if (!v.students.length) {
-        empty = v.teacher && !state.isAdmin
-          ? 'No students have chosen you as their teacher yet.'
-          : (v.teacher ? 'No students have chosen this teacher yet.' : 'No students registered yet.');
+        if (!v.teacher) empty = 'No students registered yet.';
+        else if (v.scope === 'visited') empty = 'No students have checked in to this teacher\'s activity yet.';
+        else empty = v.teacher === state.me ? 'No students have chosen you as their teacher yet.' : 'No students have chosen this teacher yet.';
       }
       tbody.innerHTML = `<tr><td colspan="${columns}" class="empty">${empty}</td></tr>`;
       return;
@@ -292,22 +387,13 @@
 
     tbody.innerHTML = rows.map((s) => {
       const complete = isComplete(s);
-      let focusCell = '';
-      if (v.focus) {
-        const r = recordOf(s, v.focus);
-        focusCell = r
-          ? `<td class="mine"><div class="photo-cell">
-              <button class="thumb" type="button" data-path="${escapeHtml(r.foto_path)}" aria-label="View photo of ${escapeHtml(s.nombre)}"><img alt="" data-src-path="${escapeHtml(r.foto_path)}"></button>
-              <span class="nowrap"><span class="yes">✓</span> ${formatTime(r.registrado_en)}</span>
-            </div></td>`
-          : '<td class="mine"><span class="no">✗</span> <span class="muted">Not yet</span></td>';
-      }
+      const group = groupOf(s);
       return `<tr class="${complete ? '' : 'is-incomplete'}">
         <td><strong>${escapeHtml(s.nombre)}</strong></td>
         <td class="nowrap">${escapeHtml(s.codigo)}</td>
-        ${showTeacher ? `<td>${escapeHtml(teacherOf(s)) || '<span class="muted">—</span>'}</td>` : ''}
-        ${focusCell}
-        ${v.others.map((a) => checkCell(recordOf(s, a))).join('')}
+        ${showTeacher ? `<td>${escapeHtml(teacherOf(s)) || '<span class="muted">—</span>'}${group ? `<br><span class="muted small">${group}</span>` : ''}</td>` : ''}
+        ${showGroup ? `<td class="nowrap">${group}</td>` : ''}
+        ${v.columns.map((t) => stationCell(s, t, t === v.focus)).join('')}
         <td class="c nowrap"><strong>${completedCount(s)}/${total}</strong></td>
         <td>${complete
           ? '<span class="badge badge-done">Complete</span>'
@@ -316,7 +402,7 @@
       </tr>`;
     }).join('');
 
-    // Only the photos of the activity in focus are loaded.
+    // Every photo is shown; the browser only downloads the ones on screen.
     const paths = [...tbody.querySelectorAll('img[data-src-path]')].map((img) => img.dataset.srcPath);
     await loadPhotoUrls(paths);
     tbody.querySelectorAll('img[data-src-path]').forEach((img) => {
@@ -328,12 +414,112 @@
   // Private photos: ask Supabase for temporary links (valid 1 hour).
   async function loadPhotoUrls(paths) {
     const missing = [...new Set(paths)].filter((p) => !state.photoUrls.has(p));
-    for (let i = 0; i < missing.length; i += 100) {
-      const chunk = missing.slice(i, i + 100);
+    const chunks = [];
+    for (let i = 0; i < missing.length; i += 200) chunks.push(missing.slice(i, i + 200));
+    await Promise.all(chunks.map(async (chunk) => {
       const { data, error } = await db.storage.from('evidencias').createSignedUrls(chunk, 3600);
-      if (error) { console.error(error); continue; }
+      if (error) return console.error(error);
       data.forEach((d) => { if (d.signedUrl) state.photoUrls.set(d.path, d.signedUrl); });
-    }
+    }));
+  }
+
+  // ---------------------------------------------------------------- activities (teacher, or administrator in "Edit")
+  // Only one activity is active: the one students can check in to.
+  function renderActivityManager(container, teacher) {
+    const list = activitiesOf(teacher);
+    const rows = list.map((a) => {
+      const checkIns = state.attendance.filter((x) => x.actividad_id === a.id).length;
+      if (state.renaming === a.id) {
+        return `<div class="act-row">
+          <input class="input" maxlength="60" value="${escapeHtml(a.nombre)}" data-rename-input aria-label="New name for ${escapeHtml(a.nombre)}">
+          <div class="invite-actions">
+            <button class="btn btn-small" type="button" data-rename-save="${escapeHtml(a.id)}">Save</button>
+            <button class="btn btn-secondary btn-small" type="button" data-rename-cancel>Cancel</button>
+          </div>
+        </div>`;
+      }
+      return `<div class="act-row ${a.activa ? 'is-active' : ''}">
+        <div>
+          <strong>${escapeHtml(a.nombre)}</strong>
+          ${a.activa ? '<span class="badge badge-done">Active</span>' : '<span class="badge badge-off">Inactive</span>'}
+          <br><span class="muted" style="font-size:14px">${checkIns} ${checkIns === 1 ? 'check-in' : 'check-ins'}</span>
+        </div>
+        <div class="invite-actions">
+          ${a.activa ? '' : `<button class="btn btn-small" type="button" data-activate="${escapeHtml(a.id)}">Activate</button>`}
+          <a class="btn btn-secondary btn-small" href="qr.html?activity=${encodeURIComponent(a.id)}" target="_blank" rel="noopener">QR code</a>
+          <button class="btn btn-secondary btn-small" type="button" data-rename="${escapeHtml(a.id)}">Rename</button>
+          ${a.activa || checkIns ? '' : `<button class="btn btn-secondary btn-small btn-danger" type="button" data-remove="${escapeHtml(a.id)}">Delete</button>`}
+        </div>
+      </div>`;
+    }).join('');
+    const add = list.length >= 10 ? '' : `<div class="invite-form act-add">
+        <div class="field">
+          <label for="${container.id}-new">Add another activity</label>
+          <input class="input" id="${container.id}-new" maxlength="60" autocomplete="off" placeholder="e.g. Conversation Club" data-add-input>
+        </div>
+        <button class="btn btn-secondary btn-small" type="button" data-add="${teacher.id}">＋ Add activity</button>
+      </div>`;
+    container.innerHTML = rows + add;
+  }
+
+  function refreshActivityManagers() {
+    if (state.isTeacher && !state.isAdmin) renderActivityManager($('mine-activities'), state.me);
+    if (editing && !$('teacher-modal').hidden) renderActivityManager($('tm-activity-manager'), editing);
+  }
+
+  function bindActivityManager(container, errorId) {
+    container.addEventListener('click', async (e) => {
+      const button = e.target.closest('button');
+      if (!button) return;
+      const d = button.dataset;
+      if (d.rename) {
+        state.renaming = d.rename;
+        refreshActivityManagers();
+        const input = container.querySelector('[data-rename-input]');
+        if (input) { input.focus(); input.select(); }
+        return;
+      }
+      if ('renameCancel' in d) {
+        state.renaming = null;
+        return refreshActivityManagers();
+      }
+
+      let call;
+      if (d.activate) {
+        call = db.rpc.bind(db, 'actividad_activar', { p_actividad: d.activate });
+      } else if (d.renameSave) {
+        const name = container.querySelector('[data-rename-input]').value.trim().replace(/\s+/g, ' ');
+        if (name.length < 2) return setAlert(errorId, 'Please write the name of the activity.');
+        call = db.rpc.bind(db, 'actividad_renombrar', { p_actividad: d.renameSave, p_nombre: name });
+      } else if (d.remove) {
+        if (!armed(button, 'Tap again to delete')) return;
+        call = db.rpc.bind(db, 'actividad_eliminar', { p_actividad: d.remove });
+      } else if (d.add) {
+        const name = container.querySelector('[data-add-input]').value.trim().replace(/\s+/g, ' ');
+        if (name.length < 2) return setAlert(errorId, 'Please write the name of the new activity.');
+        call = db.rpc.bind(db, 'actividad_agregar', { p_profesor: Number(d.add), p_nombre: name });
+      } else {
+        return;
+      }
+
+      button.disabled = true;
+      const { error } = await call();
+      if (error) {
+        button.disabled = false;
+        return setAlert(errorId, rpcMessage(error));
+      }
+      setAlert(errorId, '');
+      state.renaming = null;
+      await loadData();
+    });
+
+    // Enter saves the name instead of submitting the "Edit teacher" form.
+    container.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
+      e.preventDefault();
+      const button = e.target.closest('.act-row, .act-add').querySelector('[data-rename-save], [data-add]');
+      if (button) button.click();
+    });
   }
 
   // ---------------------------------------------------------------- tabs (administrator)
@@ -360,27 +546,37 @@
   }
 
   // ---------------------------------------------------------------- teachers (administrator)
+  function checkInsWith(teacher) {
+    const ids = new Set(activitiesOf(teacher).map((a) => a.id));
+    return state.attendance.filter((a) => ids.has(a.actividad_id)).length;
+  }
+
   function renderTeachers() {
     const list = $('teacher-rows');
-    if (!state.teachers.length) {
+    const teachers = state.teachers.filter((t) => !t.es_admin);
+    if (!teachers.length) {
       list.innerHTML = '<p class="empty">No teachers yet. Send an invitation link, or add one yourself.</p>';
       return;
     }
-    list.innerHTML = state.teachers.map((t) => {
-      const activity = activityById(t.actividad_id);
-      const count = state.students.filter((s) => activity && s.profesor_actividad === activity.id).length;
-      const checkIns = activity ? state.attendance.filter((a) => a.actividad_id === activity.id).length : 0;
+    list.innerHTML = teachers.map((t) => {
+      const activities = activitiesOf(t);
+      const count = state.students.filter((s) => s.profesor_id === t.id).length;
+      const checkIns = checkInsWith(t);
+      const names = activities.map((a) => (a.activa
+        ? `<strong>${escapeHtml(a.nombre)}</strong> <span class="badge badge-done">Active</span>`
+        : escapeHtml(a.nombre))).join(' · ');
+      const room = (activeActivity(t) || activities[0] || {}).salon;
       return `<div class="invite">
         <div class="invite-head">
-          <strong>${escapeHtml(t.nombre || t.email)}</strong>
+          <strong>${escapeHtml(nameOf(t))}</strong>
           <span class="muted" style="font-size:14px">${escapeHtml(t.email)}</span>
         </div>
-        <span>${activity ? `Activity: <strong>${escapeHtml(withRoom(activity))}</strong>` : '<span class="muted">No activity</span>'}</span>
-        <span class="muted" style="font-size:14px">${count} ${count === 1 ? 'student' : 'students'} chose this teacher · ${checkIns} check-ins at this activity</span>
+        <span>${activities.length ? `${activities.length === 1 ? 'Activity' : 'Activities'}: ${names}${room ? ` <span class="muted">– ${escapeHtml(room)}</span>` : ''}` : '<span class="muted">No activities</span>'}</span>
+        <span class="muted" style="font-size:14px">${t.grupos} ${t.grupos === 1 ? 'group' : 'groups'} · ${count} ${count === 1 ? 'student' : 'students'} chose this teacher · ${checkIns} check-ins at their activities</span>
         <div class="invite-actions">
-          ${activity ? `<button class="btn btn-small" type="button" data-see="${escapeHtml(activity.id)}">See results</button>` : ''}
+          ${activities.length ? `<button class="btn btn-small" type="button" data-see="${t.id}">See results</button>` : ''}
           <button class="btn btn-secondary btn-small" type="button" data-edit="${escapeHtml(t.email)}">Edit</button>
-          <a class="btn btn-secondary btn-small" href="qr.html${activity ? `?activity=${encodeURIComponent(activity.id)}` : ''}" target="_blank" rel="noopener">QR code</a>
+          <a class="btn btn-secondary btn-small" href="qr.html?teacher=${encodeURIComponent(t.id)}" target="_blank" rel="noopener">QR codes</a>
           <button class="btn btn-secondary btn-small btn-danger" type="button" data-delete="${escapeHtml(t.email)}">Delete</button>
         </div>
       </div>`;
@@ -391,7 +587,7 @@
     const see = e.target.closest('[data-see]');
     if (see) {
       $('f-teacher').value = see.dataset.see;
-      $('f-activity').value = see.dataset.see;
+      fillScope($('f-show'), $('f-show-field'), 'visited');
       selectTab('results');
       render();
       return;
@@ -402,7 +598,7 @@
     const del = e.target.closest('[data-delete]');
     if (!del) return;
     const teacher = state.teachers.find((t) => t.email === del.dataset.delete);
-    const checkIns = state.attendance.filter((a) => a.actividad_id === teacher.actividad_id).length;
+    const checkIns = checkInsWith(teacher);
     if (!armed(del, checkIns ? `Tap again: deletes ${checkIns} check-ins too` : 'Tap again to delete')) return;
     del.disabled = true;
     const { error } = await db.rpc('admin_eliminar_profesor', { p_email: teacher.email });
@@ -414,21 +610,28 @@
     loadData();
   });
 
-  // Add (new account) or edit (name, activity, classroom).
+  // Add (new account) or edit (name, classroom, groups, activities).
   let editing = null;
+  const newActivities = activityInputs($('tm-activities'), $('tm-add-activity'), 'tm-activity');
 
   function openTeacherModal(teacher) {
     editing = teacher || null;
-    const activity = teacher && activityById(teacher.actividad_id);
+    state.renaming = null;
+    const activities = teacher ? activitiesOf(teacher) : [];
+    const room = (teacher && (activeActivity(teacher) || activities[0])) || null;
     $('teacher-title').textContent = teacher ? 'Edit teacher' : 'Add teacher';
     $('teacher-desc').textContent = teacher
-      ? 'The QR code keeps working after you change these details.'
-      : 'Creates the teacher\'s account and their activity. Then send them their email and password.';
+      ? 'The QR codes keep working after you change these details.'
+      : 'Creates the teacher\'s account and their activities. Then send them their email and password.';
     $('tm-name').value = teacher ? teacher.nombre || '' : '';
     $('tm-email').value = teacher ? teacher.email : '';
     $('tm-email').disabled = !!teacher;
-    $('tm-activity').value = activity ? activity.nombre : '';
-    $('tm-room').value = activity ? activity.salon : '';
+    newActivities.reset();
+    $('tm-new-activities').hidden = !!teacher;
+    $('tm-room').value = room ? room.salon : '';
+    fillGroupCount($('tm-groups'), teacher ? teacher.grupos : 1);
+    $('tm-manage').hidden = !teacher;
+    if (teacher) renderActivityManager($('tm-activity-manager'), teacher);
     $('tm-password').value = '';
     $('tm-password-field').hidden = !!teacher;
     $('tm-reset').hidden = !teacher;
@@ -443,6 +646,7 @@
   function closeTeacherModal() {
     if ($('tm-submit').disabled) return;
     $('teacher-modal').hidden = true;
+    state.renaming = null;
   }
 
   // Single-use link for the teacher to choose a new password.
@@ -474,10 +678,15 @@
 
   const RPC_MESSAGES = {
     invalid_name: 'Please write the full name.',
-    invalid_activity: 'Please write the name of the activity (2 to 60 characters).',
+    invalid_activity: 'Please write the name of each activity (2 to 60 characters).',
     invalid_room: 'The classroom name is too long.',
+    invalid_groups: 'Please choose the number of groups.',
+    groups_in_use: 'Some students already chose a higher group number. Choose more groups.',
+    too_many_activities: 'A teacher can have up to 10 activities.',
+    activity_active: 'Activate another activity before deleting this one.',
+    has_checkins: 'This activity already has check-ins, so it can\'t be deleted.',
     already_teacher: 'This email is already registered as a teacher.',
-    not_allowed: 'Only the administrator can do this.',
+    not_allowed: 'You don\'t have permission to do this.',
   };
   function rpcMessage(error) {
     const key = Object.keys(RPC_MESSAGES).find((k) => (error.message || '').includes(k));
@@ -485,7 +694,7 @@
   }
 
   // A new account is created with a separate client, so the administrator stays signed in.
-  async function createTeacher(nombre, email, actividad, salon, password) {
+  async function createTeacher(nombre, email, actividades, salon, grupos, password) {
     const invite = await db.rpc('crear_invitacion', { p_nota: `Added by the administrator: ${nombre}` });
     if (invite.error) throw invite.error;
     const temp = createDb({ auth: { persistSession: false, autoRefreshToken: false, storageKey: 'rotation-new-teacher' } });
@@ -501,7 +710,7 @@
     }
     if (!up.data.session) return 'The account needs email confirmation. Turn off "Confirm email" in Supabase.';
     const reg = await temp.rpc('registrar_profesor', {
-      p_codigo: invite.data.codigo, p_nombre: nombre, p_actividad: actividad, p_salon: salon,
+      p_codigo: invite.data.codigo, p_nombre: nombre, p_actividades: actividades, p_salon: salon, p_grupos: grupos,
     });
     await temp.auth.signOut({ scope: 'local' });
     if (!reg.error) return '';
@@ -513,13 +722,15 @@
     e.preventDefault();
     const nombre = $('tm-name').value.trim().replace(/\s+/g, ' ');
     const email = $('tm-email').value.trim().toLowerCase();
-    const actividad = $('tm-activity').value.trim().replace(/\s+/g, ' ');
+    const actividades = newActivities.values();
     const salon = $('tm-room').value.trim().replace(/\s+/g, ' ');
+    const grupos = Number($('tm-groups').value);
     const password = $('tm-password').value;
 
     if (nombre.length < 3) return setAlert('tm-error', 'Please write the full name.');
     if (!editing && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setAlert('tm-error', 'Please check the email address.');
-    if (actividad.length < 2) return setAlert('tm-error', 'Please write the name of the activity.');
+    if (!editing && !actividades.length) return setAlert('tm-error', 'Please write the name of the activity.');
+    if (!editing && actividades.some((a) => a.length < 2)) return setAlert('tm-error', 'Each activity name needs at least 2 characters.');
     if (!editing && password.length < 8) return setAlert('tm-error', 'The password must have at least 8 characters.');
 
     const submit = $('tm-submit');
@@ -529,11 +740,11 @@
       let message = '';
       if (editing) {
         const { error } = await db.rpc('admin_editar_profesor', {
-          p_email: editing.email, p_nombre: nombre, p_actividad: actividad, p_salon: salon,
+          p_email: editing.email, p_nombre: nombre, p_salon: salon, p_grupos: grupos,
         });
         if (error) message = rpcMessage(error);
       } else {
-        message = await createTeacher(nombre, email, actividad, salon, password);
+        message = await createTeacher(nombre, email, actividades, salon, grupos, password);
       }
       if (message) return setAlert('tm-error', message);
       submit.disabled = false;
@@ -548,6 +759,9 @@
       $('tm-cancel').disabled = false;
     }
   });
+
+  bindActivityManager($('mine-activities'), 'mine-error');
+  bindActivityManager($('tm-activity-manager'), 'tm-error');
 
   // ---------------------------------------------------------------- invitation links (administrator)
   function inviteLink(code) {
@@ -681,8 +895,9 @@
     bgAlt: [245, 245, 240], text: [31, 42, 36], text2: [91, 102, 96],
     border: [218, 221, 216], rowAlt: [250, 250, 247], faint: [170, 175, 170],
   };
-  const PAGE = { w: 612, h: 792, m: 40, top: 92, bottom: 56 };
-  const THUMB = 40;
+  // Letter, landscape: one column per teacher.
+  const PAGE = { w: 792, h: 612, m: 36, top: 88, bottom: 52 };
+  const THUMB = 34;
 
   function loadScript(src) {
     return new Promise((resolve, reject) => {
@@ -719,7 +934,7 @@
   }
 
   // Square, small JPEG so the PDF stays light.
-  async function thumbnail(url, size = 120) {
+  async function thumbnail(url, size = 100) {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`photo ${response.status}`);
     const img = await blobToImage(await response.blob());
@@ -735,8 +950,8 @@
   async function makeThumbnails(records, onProgress) {
     const urls = new Map();
     const paths = [...new Set(records.map((r) => r.foto_path))];
-    for (let i = 0; i < paths.length; i += 100) {
-      const { data, error } = await db.storage.from('evidencias').createSignedUrls(paths.slice(i, i + 100), 600);
+    for (let i = 0; i < paths.length; i += 200) {
+      const { data, error } = await db.storage.from('evidencias').createSignedUrls(paths.slice(i, i + 200), 600);
       if (error) throw error;
       data.forEach((d) => { if (d.signedUrl) urls.set(d.path, d.signedUrl); });
     }
@@ -852,38 +1067,43 @@
     return y + 66;
   }
 
-  // One row per student: activity in focus (time + photo), the others (Done/Pending), status.
+  // One row per student; one column per teacher with the photo, activity and time.
   function progressTable(doc, y, v, thumbs) {
-    if (!v.students.length) {
-      return emptyNote(doc, y, v.teacher ? 'No students have chosen this teacher yet.' : 'No students registered yet.');
-    }
-    const mine = v.focus;
+    if (!v.students.length) return emptyNote(doc, y, 'No students in this list yet.');
+    const { showTeacher, showGroup } = extraColumns(v);
     const columns = [{ head: '#', kind: 'num', value: (s, i) => String(i + 1) }];
-    if (thumbs) columns.push({ head: 'Photo', kind: 'photo', value: () => '' });
     columns.push({ head: 'Student', kind: 'name', value: (s) => s.nombre });
     columns.push({ head: 'ID', kind: 'id', value: (s) => s.codigo });
-    if (!v.teacher) columns.push({ head: 'Teacher', kind: 'teacher', value: (s) => teacherOf(s) });
-    if (mine) {
-      columns.push({ head: mine.nombre, kind: 'mine', value: (s) => {
-        const r = recordOf(s, mine);
-        return r ? formatTime(r.registrado_en) : 'Pending';
-      } });
+    if (showTeacher) {
+      columns.push({ head: 'Teacher', kind: 'teacher', value: (s) => [teacherOf(s), groupOf(s)].filter(Boolean).join('\n') });
     }
-    v.others.forEach((a) => {
-      columns.push({ head: a.nombre, kind: 'check', value: (s) => (recordOf(s, a) ? 'Done' : 'Pending') });
+    if (showGroup) columns.push({ head: 'Group', kind: 'group', value: (s) => groupOf(s) });
+    v.columns.forEach((t) => {
+      columns.push({ head: nameOf(t), kind: 'station', teacher: t, value: (s) => {
+        const r = recordOf(s, t);
+        if (!r) return 'Pending';
+        const activity = activityById(r.actividad_id);
+        return `${activity ? activity.nombre : ''}\n${formatTime(r.registrado_en)}`;
+      } });
     });
+    columns.push({ head: 'Done', kind: 'done', value: (s) => `${completedCount(s)}/${state.stations.length}` });
     columns.push({ head: 'Status', kind: 'status', value: (s) => (isComplete(s) ? 'Complete' : 'Incomplete') });
 
+    const fixed = 20 + 110 + 46 + (showTeacher ? 90 : 0) + (showGroup ? 44 : 0) + 34 + 60;
+    const stationWidth = Math.max(44, Math.min(90, (PAGE.w - PAGE.m * 2 - fixed) / Math.max(1, v.columns.length)));
     const columnStyles = {};
     columns.forEach((c, i) => {
-      if (c.kind === 'num') columnStyles[i] = { cellWidth: 22, halign: 'center', textColor: C.text2 };
-      if (c.kind === 'photo') columnStyles[i] = { cellWidth: THUMB + 10 };
+      if (c.kind === 'num') columnStyles[i] = { cellWidth: 20, halign: 'center', textColor: C.text2 };
       if (c.kind === 'name') columnStyles[i] = { fontStyle: 'bold' };
-      if (c.kind === 'id') columnStyles[i] = { cellWidth: 50 };
-      if (['mine', 'check', 'status'].includes(c.kind)) columnStyles[i] = { halign: 'center' };
+      if (c.kind === 'id') columnStyles[i] = { cellWidth: 46 };
+      if (c.kind === 'teacher') columnStyles[i] = { cellWidth: 90 };
+      if (c.kind === 'group') columnStyles[i] = { cellWidth: 44 };
+      if (c.kind === 'station') columnStyles[i] = { cellWidth: stationWidth, halign: 'center', fontSize: 7 };
+      if (c.kind === 'done') columnStyles[i] = { cellWidth: 34, halign: 'center' };
+      if (c.kind === 'status') columnStyles[i] = { cellWidth: 60, halign: 'center' };
     });
-    const photoOf = (row) => {
-      const r = mine && recordOf(v.students[row], mine);
+    const photoOf = (row, column) => {
+      const r = recordOf(v.students[row], column.teacher);
       return r && thumbs && thumbs.get(r.foto_path);
     };
 
@@ -898,18 +1118,23 @@
       headStyles: { fillColor: C.ocre, textColor: C.text, fontStyle: 'bold', fontSize: 7, halign: 'center' },
       columnStyles,
       didParseCell: (data) => {
-        const kind = columns[data.column.index].kind;
+        const column = columns[data.column.index];
         if (data.section === 'head') {
-          if (kind === 'mine') { data.cell.styles.fillColor = C.green; data.cell.styles.textColor = [255, 255, 255]; }
+          if (column.teacher && column.teacher === v.focus) {
+            data.cell.styles.fillColor = C.green;
+            data.cell.styles.textColor = [255, 255, 255];
+          }
           return;
         }
-        if (kind === 'photo' && photoOf(data.row.index)) data.cell.styles.minCellHeight = THUMB + 8;
-        if (kind === 'mine' || kind === 'check') {
+        if (column.kind === 'station') {
           const done = data.cell.raw !== 'Pending';
           data.cell.styles.textColor = done ? C.green : C.faint;
-          data.cell.styles.fontStyle = done ? 'bold' : 'normal';
-          if (kind === 'mine') data.cell.styles.fillColor = C.greenSoft;
-        } else if (kind === 'status') {
+          if (column.teacher === v.focus) data.cell.styles.fillColor = C.greenSoft;
+          // Room for the photo above the text.
+          if (photoOf(data.row.index, column)) {
+            data.cell.styles.cellPadding = { top: THUMB + 8, right: 3, bottom: 4, left: 3 };
+          }
+        } else if (column.kind === 'status') {
           const complete = data.cell.raw === 'Complete';
           data.cell.styles.fillColor = complete ? C.greenSoft : C.goldSoft;
           data.cell.styles.textColor = complete ? C.greenDark : C.goldText;
@@ -917,11 +1142,10 @@
         }
       },
       didDrawCell: (data) => {
-        if (data.section !== 'body' || columns[data.column.index].kind !== 'photo') return;
-        const img = photoOf(data.row.index);
-        if (img) {
-          doc.addImage(img, 'JPEG', data.cell.x + 5, data.cell.y + (data.cell.height - THUMB) / 2, THUMB, THUMB);
-        }
+        const column = columns[data.column.index];
+        if (data.section !== 'body' || column.kind !== 'station') return;
+        const img = photoOf(data.row.index, column);
+        if (img) doc.addImage(img, 'JPEG', data.cell.x + (data.cell.width - THUMB) / 2, data.cell.y + 4, THUMB, THUMB);
       },
     }));
     return doc.lastAutoTable.finalY + 22;
@@ -932,43 +1156,44 @@
     const pages = doc.getNumberOfPages();
     for (let i = 1; i <= pages; i++) {
       doc.setPage(i);
-      if (logo) doc.addImage(logo, 'PNG', PAGE.m, 24, 172, 28);
+      if (logo) doc.addImage(logo, 'PNG', PAGE.m, 22, 172, 28);
       doc.setFont('times', 'bold');
       doc.setFontSize(13);
       doc.setTextColor(...C.text);
-      doc.text(pdfText(cfg.EVENT_TITLE), PAGE.w - PAGE.m, 37, { align: 'right' });
+      doc.text(pdfText(cfg.EVENT_TITLE), PAGE.w - PAGE.m, 35, { align: 'right' });
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8.5);
       doc.setTextColor(...C.text2);
-      doc.text('Attendance report', PAGE.w - PAGE.m, 50, { align: 'right' });
+      doc.text('Attendance report', PAGE.w - PAGE.m, 48, { align: 'right' });
       doc.setDrawColor(...C.green);
       doc.setLineWidth(3);
-      doc.line(PAGE.m, 64, PAGE.w - PAGE.m, 64);
+      doc.line(PAGE.m, 62, PAGE.w - PAGE.m, 62);
 
       doc.setDrawColor(...C.border);
       doc.setLineWidth(0.5);
-      doc.line(PAGE.m, PAGE.h - 40, PAGE.w - PAGE.m, PAGE.h - 40);
+      doc.line(PAGE.m, PAGE.h - 38, PAGE.w - PAGE.m, PAGE.h - 38);
       doc.setFontSize(8);
       doc.setTextColor(...C.text2);
-      doc.text(pdfText(cfg.FOOTER), PAGE.m, PAGE.h - 26);
-      doc.text(pdfText(`Generated ${generatedAt}  |  Page ${i} of ${pages}`), PAGE.w - PAGE.m, PAGE.h - 26, { align: 'right' });
+      doc.text(pdfText(cfg.FOOTER), PAGE.m, PAGE.h - 24);
+      doc.text(pdfText(`Generated ${generatedAt}  |  Page ${i} of ${pages}`), PAGE.w - PAGE.m, PAGE.h - 24, { align: 'right' });
     }
   }
 
   function buildReport(doc, v, thumbs) {
     const n = v.students.length;
     const details = [];
-    if (v.teacher) details.push(`Activity: ${v.teacher.nombre}${v.teacher.salon ? `  |  ${v.teacher.salon}` : ''}`);
-    details.push(v.teacher
-      ? `${n} ${n === 1 ? 'student' : 'students'} chose ${state.isAdmin ? 'this teacher' : 'you as their teacher'}`
-      : `${state.activities.length} activities  |  ${n} students registered`);
-    if (v.focus && state.isAdmin) details.push(`Photos: ${v.focus.nombre}`);
+    if (v.teacher) {
+      const activities = activitiesOf(v.teacher).map((a) => `${a.nombre}${a.activa ? ' (active)' : ''}`);
+      details.push(`${activities.length === 1 ? 'Activity' : 'Activities'}: ${activities.join(', ')}`);
+      details.push(`${scopeLabel(v)}: ${n} ${n === 1 ? 'student' : 'students'}`);
+    } else {
+      details.push(`${state.stations.length} teachers  |  ${n} students registered`);
+    }
 
-    let y = titleBlock(doc, PAGE.top, v.teacher ? 'Attendance report · Students of' : 'Attendance report',
-      v.teacher ? v.teacher.profesor : 'All teachers', details);
+    let y = titleBlock(doc, PAGE.top, v.teacher ? 'Attendance report · Teacher' : 'Attendance report',
+      v.teacher ? nameOf(v.teacher) : 'All teachers', details);
     y = statBoxes(doc, y, summary(v));
-    y = sectionHeading(doc, y, "Students' progress",
-      v.focus ? `Check-in time at ${v.focus.nombre}; other activities: done or pending` : 'Done or pending per activity');
+    y = sectionHeading(doc, y, "Students' progress", 'For each teacher: the activity the student did and the check-in time');
     progressTable(doc, y, v, thumbs);
   }
 
@@ -977,18 +1202,20 @@
   }
 
   // Dialog
+  function describePdf() {
+    const v = currentView($('pdf-scope').value);
+    const n = v.students.length;
+    $('pdf-desc').textContent = `${scopeLabel(v)} (${n} ${n === 1 ? 'student' : 'students'}), with the activity they did with each teacher and whether they finished.`;
+  }
+
   function openPdfDialog() {
-    const v = currentView();
-    const who = v.teacher ? (state.isAdmin ? `The students of ${v.teacher.profesor}` : 'Your students') : 'Every student';
-    $('pdf-desc').textContent = v.focus
-      ? `${who}: their check-in at ${v.focus.nombre}, and whether they completed the other activities.`
-      : `${who} and whether they completed each activity.`;
-    $('pdf-photos-label').hidden = !v.focus;
-    $('pdf-photos-text').textContent = v.focus ? `Include ${v.focus.nombre} photo thumbnails` : '';
+    fillScope($('pdf-scope'), $('pdf-scope-field'), $('f-show').value);
+    describePdf();
     setAlert('pdf-error', '');
     $('pdf-status').textContent = '';
     $('pdf-modal').hidden = false;
   }
+  $('pdf-scope').addEventListener('change', describePdf);
 
   function closePdfDialog() {
     if ($('pdf-submit').disabled) return;
@@ -1002,7 +1229,7 @@
 
   $('pdf-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const v = currentView();
+    const v = currentView($('pdf-scope').value);
     const submit = $('pdf-submit');
     submit.disabled = true;
     $('pdf-cancel').disabled = true;
@@ -1015,22 +1242,24 @@
       const logo = await blobToDataUrl(logoBlob);
 
       let thumbs = null;
-      if (v.focus && $('pdf-photos').checked) {
-        const records = v.students.map((s) => recordOf(s, v.focus)).filter(Boolean);
+      if ($('pdf-photos').checked) {
+        const records = v.students.flatMap((s) => v.columns.map((t) => recordOf(s, t))).filter(Boolean);
         thumbs = await makeThumbnails(records, (done, total) => {
           $('pdf-status').textContent = `Adding photos… ${done} of ${total}`;
         });
       }
 
       $('pdf-status').textContent = 'Creating the PDF…';
-      const doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'letter' });
+      const doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'letter', orientation: 'landscape' });
       doc.setProperties({ title: `${cfg.EVENT_TITLE} - Attendance report`, author: cfg.FOOTER });
       buildReport(doc, v, thumbs);
 
       const now = new Date();
       decoratePages(doc, logo, `${formatDate(now)}, ${formatTime(now)}`);
       const day = formatDateTimePlain(now).slice(0, 10);
-      doc.save(`${fileSafe(cfg.EVENT_TITLE)}-${v.teacher ? fileSafe(v.teacher.profesor) : 'All-teachers'}-${day}.pdf`);
+      const suffix = { visited: 'activity', mine: 'students' }[v.scope] || v.scope.replace('g', 'group-');
+      const who = v.teacher ? `${fileSafe(nameOf(v.teacher))}-${suffix}` : 'All-teachers';
+      doc.save(`${fileSafe(cfg.EVENT_TITLE)}-${who}-${day}.pdf`);
 
       $('pdf-status').textContent = '';
       submit.disabled = false;

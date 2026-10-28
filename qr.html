@@ -61,7 +61,7 @@
   <div class="qr-toolbar">
     <div>
       <h1 class="dash-title">QR codes</h1>
-      <p>One page per activity. Print them and post each one at the door of its classroom.</p>
+      <p>One page per activity. Print them and post each one at the door of its classroom. If a teacher has more than one activity, post the QR code of the one that's open now, and change it when they switch.</p>
     </div>
     <button class="btn btn-small" type="button" id="btn-print" onclick="window.print()">🖨 Print all</button>
   </div>
@@ -83,7 +83,8 @@
       const { createDb, escapeHtml, friendlyError, fillBranding, cfg } = window.App;
       fillBranding();
       const db = createDb({ auth: { persistSession: false, autoRefreshToken: false } });
-      const { data, error } = await db.from('actividades').select('id, nombre, salon, profesor').order('orden');
+      const { data, error } = await db.from('actividades')
+        .select('id, nombre, salon, profesor, profesor_id').not('profesor_id', 'is', null).order('orden');
       document.getElementById('qr-loading').hidden = true;
 
       if (error) {
@@ -92,10 +93,15 @@
         return;
       }
 
-      // ?activity=id prints only that activity's sheet.
-      const only = new URLSearchParams(location.search).get('activity');
-      const list = only ? data.filter((a) => a.id === only) : data;
-      if (only && list.length) document.getElementById('btn-print').textContent = '🖨 Print';
+      // ?activity=id prints only that activity's sheet; ?teacher=id, that teacher's sheets.
+      const params = new URLSearchParams(location.search);
+      const onlyActivity = params.get('activity');
+      const onlyTeacher = params.get('teacher');
+      data.sort((x, y) => x.profesor.localeCompare(y.profesor, 'es'));
+      let list = data;
+      if (onlyActivity) list = data.filter((a) => a.id === onlyActivity);
+      else if (onlyTeacher) list = data.filter((a) => String(a.profesor_id) === onlyTeacher);
+      if (list.length === 1) document.getElementById('btn-print').textContent = '🖨 Print';
 
       const sheets = document.getElementById('sheets');
       list.forEach((a) => {

@@ -56,8 +56,44 @@
     document.querySelectorAll('[data-footer]').forEach((el) => { el.textContent = cfg.FOOTER; });
   }
 
+  // One or more activity names, with "+ Add another activity" (up to 10).
+  function activityInputs(container, addButton, idPrefix) {
+    const MAX = 10;
+
+    function rows() { return [...container.querySelectorAll('input')]; }
+
+    function addRow(value) {
+      const n = rows().length;
+      const row = document.createElement('div');
+      row.className = 'activity-input';
+      row.innerHTML = `<input class="input" id="${idPrefix}-${n}" autocomplete="off" maxlength="60"
+          placeholder="${n ? 'Another activity' : 'e.g. Creative Writing'}" aria-label="Activity ${n + 1}">
+        ${n ? '<button class="btn btn-secondary btn-small" type="button" aria-label="Remove this activity">×</button>' : ''}`;
+      row.querySelector('input').value = value || '';
+      const remove = row.querySelector('button');
+      if (remove) remove.addEventListener('click', () => { row.remove(); addButton.hidden = false; });
+      container.appendChild(row);
+      addButton.hidden = rows().length >= MAX;
+      return row.querySelector('input');
+    }
+
+    addButton.addEventListener('click', () => addRow('').focus());
+
+    return {
+      values: () => rows().map((i) => i.value.trim().replace(/\s+/g, ' ')).filter(Boolean),
+      reset() { container.innerHTML = ''; addRow(''); addButton.hidden = false; },
+    };
+  }
+
+  // "1 group" … "10 groups"
+  function fillGroupCount(select, value) {
+    select.innerHTML = Array.from({ length: 10 }, (_, i) =>
+      `<option value="${i + 1}">${i + 1} ${i ? 'groups' : 'group'}</option>`).join('');
+    select.value = String(value || 1);
+  }
+
   window.App = {
     cfg, createDb, formatDate, formatTime, formatDateTimePlain, escapeHtml, friendlyError,
-    storageGet, storageSet, storageRemove, fillBranding,
+    storageGet, storageSet, storageRemove, fillBranding, activityInputs, fillGroupCount,
   };
 })();

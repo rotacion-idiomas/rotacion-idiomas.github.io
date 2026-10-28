@@ -10,12 +10,13 @@
   const PHOTO_MAX_BYTES = 200 * 1024;
 
   const state = {
-    activities: [],
+    activities: [],   // every activity, open or not
+    teachers: [],     // [{ id, nombre, grupos }]
     activity: null,   // activity being checked in, or null
-    student: null,    // { codigo, nombre, profesor_actividad, profesor }
+    student: null,    // { codigo, nombre, profesor_id, profesor, grupo }
     done: [],         // [{ actividad_id, registrado_en }]
     photo: null,      // compressed Blob
-    draft: null,      // { nombre, profesor } waiting for "Is this you?"
+    draft: null,      // { nombre, profesor, grupo } waiting for "Is this you?"
   };
 
   const $ = (id) => document.getElementById(id);
@@ -57,9 +58,24 @@
 
   // ---------------------------------------------------------------- data
   async function fetchActivities() {
-    const { data, error } = await db.from('actividades').select('id, nombre, salon, profesor').order('orden');
+    const { data, error } = await db.from('actividades')
+      .select('id, nombre, salon, profesor, profesor_id, activa').order('orden');
     if (error) throw error;
     return data;
+  }
+
+  async function fetchTeachers() {
+    const { data, error } = await db.rpc('profesores_publicos');
+    if (error) throw error;
+    return data || [];
+  }
+
+  // Teachers can switch their open activity at any time, so the lists are reloaded often.
+  async function loadLists() {
+    const [activities, teachers] = await Promise.all([fetchActivities(), fetchTeachers()]);
+    state.activities = activities;
+    state.teachers = teachers;
+    if (state.activity) state.activity = activityById(state.activity.id) || state.activity;
   }
 
   async function fetchProgress(code) {
@@ -71,7 +87,7 @@
   function rememberStudent(student) {
     state.student = {
       codigo: student.codigo, nombre: student.nombre,
-      profesor_actividad: student.profesor_actividad, profesor: student.profesor,
+      profesor_id: student.profesor_id, profesor: student.profesor, grupo: student.grupo,
     };
     storageSet(STUDENT_KEY, state.student);
   }
@@ -92,27 +108,51 @@
     }
   }
 
+  function activityById(id) {
+    return state.activities.find((a) => a.id === id) || null;
+  }
+
+  function teacherById(id) {
+    return state.teachers.find((t) => t.id === id) || null;
+  }
+
+  // One stop per teacher, at the activity they have open now.
+  // Students need one check-in with each teacher, whichever activity it was.
+  function stops() {
+    return state.teachers
+      .map((teacher) => ({ teacher, activity: state.activities.find((a) => a.profesor_id === teacher.id && a.activa) }))
+      .filter((s) => s.activity);
+  }
+
+  function recordWith(teacherId) {
+    return state.done.find((d) => {
+      const a = activityById(d.actividad_id);
+      return a && a.profesor_id === teacherId;
+    }) || null;
+  }
+
   function allDone() {
-    const doneIds = new Set(state.done.map((d) => d.actividad_id));
-    return state.activities.length > 0 && state.activities.every((a) => doneIds.has(a.id));
+    const list = stops();
+    return list.length > 0 && list.every((s) => recordWith(s.teacher.id));
   }
 
   // ---------------------------------------------------------------- progress
   function renderProgress(container) {
-    const total = state.activities.length;
-    const doneIds = new Set(state.done.map((d) => d.actividad_id));
-    const count = state.activities.filter((a) => doneIds.has(a.id)).length;
+    const list = stops();
+    const total = list.length;
+    const count = list.filter((s) => recordWith(s.teacher.id)).length;
     const pct = total ? Math.round((count / total) * 100) : 0;
 
-    const items = state.activities.map((a) => {
-      const record = state.done.find((d) => d.actividad_id === a.id);
-      const current = state.activity && state.activity.id === a.id;
+    const items = list.map(({ teacher, activity }) => {
+      const record = recordWith(teacher.id);
+      const shown = (record && activityById(record.actividad_id)) || activity;
+      const current = state.activity && state.activity.profesor_id === teacher.id;
       const meta = record
-        ? `Done · ${formatTime(record.registrado_en)}`
-        : `${a.salon ? `${escapeHtml(a.salon)} · ` : ''}Pending`;
+        ? `${escapeHtml(teacher.nombre)} · Done · ${formatTime(record.registrado_en)}`
+        : `${escapeHtml(teacher.nombre)}${activity.salon ? ` · ${escapeHtml(activity.salon)}` : ''} · Pending`;
       return `<li class="${current ? 'is-current' : ''}">
         <span class="dot ${record ? 'is-done' : ''}" aria-hidden="true">${record ? '✓' : ''}</span>
-        <span><span class="name">${escapeHtml(a.nombre)}</span><br><span class="meta">${meta}</span></span>
+        <span><span class="name">${escapeHtml(shown.nombre)}</span><br><span class="meta">${meta}</span></span>
       </li>`;
     }).join('');
 
@@ -137,7 +177,7 @@
     state.student = storageGet(STUDENT_KEY);
 
     try {
-      state.activities = await fetchActivities();
+      await loadLists();
     } catch (err) {
       return showError(err, init);
     }
@@ -159,6 +199,7 @@
       const [found, done] = await Promise.all([
         db.rpc('buscar_estudiante', { p_codigo: state.student.codigo }),
         fetchProgress(state.student.codigo),
+        loadLists(),
       ]);
       if (found.error) throw found.error;
       // The registration saved on this phone no longer exists (e.g. data was reset).
@@ -166,6 +207,7 @@
         forgetStudent();
         return showRegister();
       }
+      rememberStudent(found.data);
       state.done = done;
     } catch (err) {
       return showError(err, goToMain);
@@ -178,8 +220,9 @@
       return show('welcome');
     }
 
-    const record = state.done.find((d) => d.actividad_id === state.activity.id);
+    const record = recordWith(state.activity.profesor_id);
     if (record) return showDone(record, false);
+    if (!state.activity.activa) return showClosed();
 
     resetPhoto();
     $('photo-name').textContent = state.student.nombre.split(' ')[0];
@@ -194,20 +237,37 @@
     show('register');
   }
 
-  // Teachers come from the activities (each activity has its teacher).
   function fillTeacherSelect() {
     const select = $('f-teacher');
     const current = select.value;
-    const teachers = [...state.activities].sort((a, b) => a.profesor.localeCompare(b.profesor, 'es'));
-    select.innerHTML = '<option value="">Choose your teacher…</option>' + teachers.map((a) =>
-      `<option value="${escapeHtml(a.id)}">${escapeHtml(a.profesor)}</option>`).join('');
-    select.value = current;
+    select.innerHTML = '<option value="">Choose your teacher…</option>' + state.teachers.map((t) =>
+      `<option value="${t.id}">${escapeHtml(t.nombre)}</option>`).join('');
+    select.value = state.teachers.some((t) => String(t.id) === current) ? current : '';
+    fillGroupSelect();
   }
 
-  async function register(nombre, profesor, confirmed, button) {
+  // The group is only asked when the chosen teacher has more than one.
+  function fillGroupSelect() {
+    const teacher = teacherById(Number($('f-teacher').value));
+    const groups = teacher ? teacher.grupos : 1;
+    const select = $('f-group');
+    const current = Number(select.value);
+    $('f-group-field').hidden = groups < 2;
+    select.innerHTML = '<option value="">Choose your group…</option>' + Array.from({ length: groups }, (_, i) =>
+      `<option value="${i + 1}">Group ${i + 1}</option>`).join('');
+    select.value = current && current <= groups ? String(current) : '';
+  }
+  $('f-teacher').addEventListener('change', fillGroupSelect);
+
+  function groupLabel(student) {
+    const teacher = teacherById(student.profesor_id);
+    return teacher && teacher.grupos > 1 ? ` · Group ${student.grupo}` : '';
+  }
+
+  async function register(nombre, profesor, grupo, confirmed, button) {
     setBusy(button, true, 'Saving…');
     const { data, error } = await db.rpc('registrar_estudiante_nuevo', {
-      p_nombre: nombre, p_profesor: profesor, p_confirmado: confirmed,
+      p_nombre: nombre, p_profesor: profesor, p_grupo: grupo, p_confirmado: confirmed,
     });
     setBusy(button, false);
 
@@ -216,7 +276,7 @@
       return show('register');
     }
     if (data.status === 'possible_match') {
-      state.draft = { nombre, profesor };
+      state.draft = { nombre, profesor, grupo };
       return showMatches(data.matches);
     }
     state.draft = null;
@@ -227,18 +287,20 @@
   $('form-new').addEventListener('submit', (e) => {
     e.preventDefault();
     const nombre = $('f-name').value.trim().replace(/\s+/g, ' ');
-    const profesor = $('f-teacher').value;
+    const teacher = teacherById(Number($('f-teacher').value));
+    const grupo = teacher && teacher.grupos > 1 ? Number($('f-group').value) : 1;
 
     if (nombre.length < 3 || !nombre.includes(' ')) return setAlert('register-error', 'Please write your full name (first and last name).');
-    if (!profesor) return setAlert('register-error', 'Please choose your teacher.');
+    if (!teacher) return setAlert('register-error', 'Please choose your teacher.');
+    if (!grupo) return setAlert('register-error', 'Please choose your group.');
     setAlert('register-error', '');
-    register(nombre, profesor, false, e.submitter || e.target.querySelector('button'));
+    register(nombre, teacher.id, grupo, false, e.submitter || e.target.querySelector('button'));
   });
 
   function showMatches(matches) {
     $('confirm-list').innerHTML = matches.map((m, i) => `
       <button class="match-btn" type="button" data-index="${i}">
-        <span><strong>${escapeHtml(m.nombre)}</strong><br><span class="muted">${m.profesor ? `Teacher: ${escapeHtml(m.profesor)}` : ''}</span></span>
+        <span><strong>${escapeHtml(m.nombre)}</strong><br><span class="muted">${m.profesor ? `Teacher: ${escapeHtml(m.profesor)}${groupLabel(m)}` : ''}</span></span>
         <span class="arrow" aria-hidden="true">›</span>
       </button>`).join('');
     $('confirm-list').querySelectorAll('.match-btn').forEach((button) => {
@@ -253,7 +315,7 @@
 
   $('confirm-no').addEventListener('click', (e) => {
     if (!state.draft) return showRegister();
-    register(state.draft.nombre, state.draft.profesor, true, e.currentTarget);
+    register(state.draft.nombre, state.draft.profesor, state.draft.grupo, true, e.currentTarget);
   });
 
   $('switch-student').addEventListener('click', () => {
@@ -375,6 +437,8 @@
         forgetStudent();
         return showRegister('We could not find your registration. Please register again.');
       }
+      // The teacher switched to another activity while the student was taking the photo.
+      if (/activity_inactive/.test(err.message || '')) return goToMain();
       console.error(err);
       setAlert('photo-error', friendlyError(err));
     } finally {
@@ -387,23 +451,43 @@
   function showDone(record, isNew) {
     if (allDone()) return showThanks();
 
+    const activity = activityById(record.actividad_id) || state.activity;
+    const teacher = teacherById(activity.profesor_id);
+    const otherActivity = activity.id !== state.activity.id;
     const when = `${formatDate(record.registrado_en)} at ${formatTime(record.registrado_en)}`;
     $('done-icon').classList.toggle('is-warning', !isNew);
     $('done-icon').textContent = isNew ? '✓' : '!';
-    $('done-title').textContent = isNew
-      ? `You're checked in to ${state.activity.nombre}!`
-      : `You already checked in to ${state.activity.nombre}`;
-    $('done-text').textContent = isNew
-      ? `${state.student.nombre} · ${when}`
-      : `Your check-in was saved on ${when}. There's no need to do it again.`;
+    if (isNew) {
+      $('done-title').textContent = `You're checked in to ${activity.nombre}!`;
+      $('done-text').textContent = `${state.student.nombre} · ${when}`;
+    } else if (otherActivity) {
+      $('done-title').textContent = `You already did ${teacher ? `${teacher.nombre}'s` : 'this teacher\'s'} activity`;
+      $('done-text').textContent = `You checked in to ${activity.nombre} on ${when}. You only need one activity with each teacher.`;
+    } else {
+      $('done-title').textContent = `You already checked in to ${activity.nombre}`;
+      $('done-text').textContent = `Your check-in was saved on ${when}. There's no need to do it again.`;
+    }
 
     renderProgress($('done-progress'));
     $('done-next').textContent = 'When you get to your next classroom, tap "Next activity" and scan its QR code.';
     show('done');
   }
 
+  // The QR is from an activity the teacher isn't running right now.
+  function showClosed() {
+    const activity = state.activity;
+    const teacher = teacherById(activity.profesor_id);
+    const open = state.activities.find((a) => a.profesor_id === activity.profesor_id && a.activa);
+    $('closed-title').textContent = `${activity.nombre} isn't open right now`;
+    $('closed-text').textContent = ' ' + (open
+      ? `${teacher ? teacher.nombre : 'The teacher'} is running ${open.nombre} now. Scan the QR code of that activity.`
+      : 'Please ask your teacher for help.');
+    renderProgress($('closed-progress'));
+    show('closed');
+  }
+
   function showThanks() {
-    const total = state.activities.length;
+    const total = stops().length;
     $('thanks-title').textContent = `Thank you, ${state.student.nombre.split(' ')[0]}!`;
     $('thanks-text').textContent = `You've completed all ${total} activities of the ${window.App.cfg.EVENT_TITLE}.`;
     renderProgress($('thanks-progress'));
@@ -477,6 +561,7 @@
     $('scanner').classList.remove('is-found');
     document.body.style.overflow = 'hidden';
     scannerMessage('Starting camera…');
+    loadLists().catch((err) => console.error(err));   // so newly added activities are recognized
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       return scannerMessage("This browser can't open the camera here. Scan the QR code with your phone's camera app instead.", true);
