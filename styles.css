@@ -210,25 +210,6 @@ form { display: grid; gap: 16px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .loading { display: grid; justify-items: center; gap: 12px; padding: 40px 0; color: var(--text-2); }
 
-/* ---------- Photo ---------- */
-.photo-preview {
-  width: 100%;
-  max-height: 60vh;
-  object-fit: contain;
-  border-radius: var(--radius);
-  background: var(--bg-alt);
-  display: block;
-}
-.photo-placeholder {
-  border: 2px dashed var(--border);
-  border-radius: var(--radius);
-  padding: 32px 16px;
-  text-align: center;
-  color: var(--text-2);
-  background: var(--bg-alt);
-}
-.photo-placeholder .camera { font-size: 44px; display: block; margin-bottom: 6px; }
-
 /* ---------- Progress ---------- */
 .progress-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .progress-head strong { font-size: 18px; }
@@ -297,7 +278,7 @@ form { display: grid; gap: 16px; }
 .match-btn:hover { background: #D6EEDD; }
 .match-btn .arrow { color: var(--green); font-size: 22px; font-weight: bold; }
 
-/* ---------- Full-screen camera ---------- */
+/* ---------- In-page QR scanner ---------- */
 .scanner {
   position: fixed;
   inset: 0;
@@ -327,15 +308,31 @@ form { display: grid; gap: 16px; }
 }
 .scanner-view { position: relative; flex: 1; overflow: hidden; background: #000; }
 .scanner-view video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-/* Selfie camera: the canvas shows the whole photo, crown included */
-#camera-video { opacity: 0; pointer-events: none; }
-.scanner-view canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
-.camera-foot { display: grid; gap: 10px; }
-.camera-shoot { font-size: 20px; min-height: 60px; }
-.camera-shoot:disabled { background: #3B4A41; border-color: #3B4A41; opacity: 1; color: rgba(255,255,255,.55); }
+.scanner-frame { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.scanner-frame span {
+  width: min(70vw, 70vh, 300px);
+  aspect-ratio: 1;
+  border-radius: 18px;
+  box-shadow: 0 0 0 100vmax rgba(0,0,0,.45);
+  outline: 4px solid #fff;
+  outline-offset: -4px;
+  position: relative;
+}
+.scanner-frame span::after {
+  content: "";
+  position: absolute;
+  left: 8%; right: 8%;
+  height: 3px;
+  top: 10%;
+  background: var(--green-light);
+  box-shadow: 0 0 12px var(--green-light);
+  animation: scanline 2s ease-in-out infinite alternate;
+}
+.scanner.is-found .scanner-frame span { outline-color: var(--green-light); }
+@keyframes scanline { to { top: 88%; } }
 .scanner-msg { padding: 16px; text-align: center; font-size: 16px; min-height: 56px; }
 .scanner-msg.is-error { color: #FFD7D7; }
-.scanner-foot { padding: 0 16px 20px; max-width: 480px; width: 100%; margin: 0 auto; }
+.scanner-foot { display: grid; gap: 10px; padding: 0 16px 20px; max-width: 480px; width: 100%; margin: 0 auto; }
 .scanner-foot .btn-secondary { background: transparent; color: #fff; border-color: rgba(255,255,255,.6); }
 .scanner-foot .btn-secondary:hover:not(:disabled) { background: rgba(255,255,255,.1); color: #fff; }
 
@@ -388,23 +385,8 @@ td.c, th.c { text-align: center; }
 .nowrap { white-space: nowrap; }
 .muted { color: var(--text-2); }
 
-.thumb {
-  width: 64px; height: 64px;
-  object-fit: cover;
-  border-radius: 6px;
-  background: var(--bg-alt);
-  display: block;
-  cursor: zoom-in;
-  border: 1px solid var(--border);
-  padding: 0;
-}
-button.thumb { appearance: none; overflow: hidden; }
-button.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-
 th.mine { background: var(--green); color: #fff; }
 td.mine { background: var(--green-soft); }
-.photo-cell { display: flex; align-items: center; gap: 10px; }
-.photo-cell .thumb { width: 56px; height: 56px; flex: none; }
 .yes { color: var(--green); font-weight: bold; font-size: 18px; }
 .no { color: #B9BEB9; font-size: 18px; }
 tr.is-incomplete td:first-child { box-shadow: inset 4px 0 0 var(--gold); }
@@ -456,29 +438,6 @@ tr.is-incomplete td:first-child { box-shadow: inset 4px 0 0 var(--gold); }
 .empty { padding: 40px 16px; text-align: center; color: var(--text-2); }
 
 .login { max-width: 400px; margin: 48px auto; padding: 0 16px; width: 100%; }
-
-/* Lightbox */
-.lightbox {
-  position: fixed; inset: 0;
-  background: rgba(15, 20, 17, .88);
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  z-index: 10;
-}
-.lightbox figure { margin: 0; max-width: 960px; width: 100%; text-align: center; color: #fff; }
-.lightbox img { max-width: 100%; max-height: 78vh; border-radius: var(--radius); background: #222; }
-.lightbox figcaption { margin-top: 10px; font-size: 15px; }
-.lightbox .close {
-  position: absolute; top: 12px; right: 12px;
-  width: 48px; height: 48px;
-  border-radius: 50%;
-  border: 0;
-  background: #fff;
-  color: var(--text);
-  font-size: 26px;
-  cursor: pointer;
-}
 
 /* Download dialog */
 .modal {

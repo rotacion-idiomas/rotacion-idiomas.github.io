@@ -19,7 +19,6 @@
     students: [],           // every student the account can see
     attendance: [],
     byStudent: new Map(),   // codigo -> Map(profesor_id -> attendance)
-    photoUrls: new Map(),   // foto_path -> signed URL
     email: '',
     me: null,               // row of the signed-in teacher
     isTeacher: false,       // accounts not in 'profesores' can't see students
@@ -94,7 +93,6 @@
     await db.auth.signOut();
     $('user-box').hidden = true;
     $('login-form').reset();
-    state.photoUrls.clear();
     showView('login');
   });
 
@@ -125,7 +123,7 @@
       const [activities, students, attendance, teachers] = await Promise.all([
         fetchAll('actividades', 'id, nombre, salon, profesor, orden, profesor_id, activa', 'orden'),
         fetchAll('estudiantes', 'codigo, nombre, profesor_id, grupo, creado_en', 'codigo'),
-        fetchAll('asistencias', 'id, estudiante_codigo, actividad_id, registrado_en, foto_path', 'id'),
+        fetchAll('asistencias', 'id, estudiante_codigo, actividad_id, registrado_en', 'id'),
         fetchAll('profesores', 'id, email, nombre, grupos, nombres_grupos, es_admin, creado_en', 'creado_en'),
       ]);
       state.activities = activities;
@@ -145,8 +143,10 @@
         if (activity && done && !done.has(activity.profesor_id)) done.set(activity.profesor_id, a);
       });
 
+      // Only the links still waiting to be used; a used one shows up as a teacher instead.
       if (state.isAdmin) {
-        const invites = await db.from('invitaciones').select('*').order('creada_en', { ascending: false });
+        const invites = await db.from('invitaciones').select('*').is('usada_en', null)
+          .order('creada_en', { ascending: false });
         if (invites.error) throw invites.error;
         state.invites = invites.data;
       }
@@ -354,20 +354,19 @@
   $('search').addEventListener('input', renderTable);
   $('only-incomplete').addEventListener('change', renderTable);
 
-  // Photo, time and activity of the student's check-in with this teacher.
+  // Time and activity of the student's check-in with this teacher.
   function stationCell(student, teacher, isFocus) {
     const r = recordOf(student, teacher);
     const mine = isFocus ? 'mine' : '';
     if (!r) return `<td class="c ${mine}"><span class="no" title="Not yet">✗</span></td>`;
     const activity = activityById(r.actividad_id);
     const name = activity ? activity.nombre : '';
-    return `<td class="${mine}"><div class="photo-cell">
-        <button class="thumb" type="button" data-path="${escapeHtml(r.foto_path)}" aria-label="View photo of ${escapeHtml(student.nombre)} at ${escapeHtml(name)}"><img alt="" loading="lazy" data-src-path="${escapeHtml(r.foto_path)}"></button>
+    return `<td class="${mine}">
         <span class="cell-meta"><span class="nowrap"><span class="yes">✓</span> ${formatTime(r.registrado_en)}</span><span class="muted">${escapeHtml(name)}</span></span>
-      </div></td>`;
+      </td>`;
   }
 
-  async function renderTable() {
+  function renderTable() {
     const v = currentView();
     const total = state.stations.length;
     const { showTeacher, showGroup } = extraColumns(v);
@@ -412,26 +411,6 @@
         ${state.isAdmin ? `<td><button class="btn btn-secondary btn-small btn-danger" type="button" data-delete-student="${escapeHtml(s.codigo)}">Delete</button></td>` : ''}
       </tr>`;
     }).join('');
-
-    // Every photo is shown; the browser only downloads the ones on screen.
-    const paths = [...tbody.querySelectorAll('img[data-src-path]')].map((img) => img.dataset.srcPath);
-    await loadPhotoUrls(paths);
-    tbody.querySelectorAll('img[data-src-path]').forEach((img) => {
-      const url = state.photoUrls.get(img.dataset.srcPath);
-      if (url) img.src = url;
-    });
-  }
-
-  // Private photos: ask Supabase for temporary links (valid 1 hour).
-  async function loadPhotoUrls(paths) {
-    const missing = [...new Set(paths)].filter((p) => !state.photoUrls.has(p));
-    const chunks = [];
-    for (let i = 0; i < missing.length; i += 200) chunks.push(missing.slice(i, i + 200));
-    await Promise.all(chunks.map(async (chunk) => {
-      const { data, error } = await db.storage.from('evidencias').createSignedUrls(chunk, 3600);
-      if (error) return console.error(error);
-      data.forEach((d) => { if (d.signedUrl) state.photoUrls.set(d.path, d.signedUrl); });
-    }));
   }
 
   // ---------------------------------------------------------------- activities (teacher, or administrator in "Edit")
@@ -503,19 +482,11 @@
         if (name.length < 2) return setAlert(errorId, 'Please write the name of the activity.');
         call = db.rpc.bind(db, 'actividad_renombrar', { p_actividad: d.renameSave, p_nombre: name });
       } else if (d.remove) {
-        const photos = state.attendance.filter((a) => a.actividad_id === d.remove).map((a) => a.foto_path);
+        const checkIns = state.attendance.filter((a) => a.actividad_id === d.remove).length;
         let label = 'wasActive' in d ? 'Tap again: the next one becomes active' : 'Tap again to delete';
-        if (photos.length) label = `Tap again: deletes ${photos.length} ${photos.length === 1 ? 'check-in' : 'check-ins'} too`;
+        if (checkIns) label = `Tap again: deletes ${checkIns} ${checkIns === 1 ? 'check-in' : 'check-ins'} too`;
         if (!armed(button, label)) return;
-        call = async () => {
-          const result = await db.rpc('actividad_eliminar', { p_actividad: d.remove });
-          // Only the administrator can remove the photos; for a teacher they just stay stored.
-          if (!result.error && photos.length && state.isAdmin) {
-            const removed = await db.storage.from('evidencias').remove(photos);
-            if (removed.error) console.error(removed.error);
-          }
-          return result;
-        };
+        call = db.rpc.bind(db, 'actividad_eliminar', { p_actividad: d.remove });
       } else if (d.add) {
         const name = container.querySelector('[data-add-input]').value.trim().replace(/\s+/g, ' ');
         if (name.length < 2) return setAlert(errorId, 'Please write the name of the new activity.');
@@ -803,21 +774,18 @@
     }
     list.innerHTML = state.invites.map((inv) => {
       const link = inviteLink(inv.codigo);
-      const used = !!inv.usada_en;
       const message = `Hi! Create your teacher account for the ${cfg.EVENT_TITLE} here (this link works only once): ${link}`;
       return `<div class="invite ${inv.codigo === state.newInvite ? 'is-new' : ''}">
         <div class="invite-head">
           <strong>${inv.nota ? escapeHtml(inv.nota) : `<span class="muted">Link created ${formatDate(inv.creada_en)}</span>`}</strong>
-          ${used ? '<span class="badge badge-done">Used</span>' : '<span class="badge badge-pending">Waiting</span>'}
+          <span class="badge badge-pending">Waiting</span>
         </div>
-        ${used
-          ? `<span class="muted" style="font-size:14px">Account created by ${escapeHtml(inv.usada_por)} · ${formatDate(inv.usada_en)}, ${formatTime(inv.usada_en)}</span>`
-          : `<span class="invite-link">${escapeHtml(link)}</span>
-            <div class="invite-actions">
-              <button class="btn btn-small" type="button" data-copy="${escapeHtml(link)}">Copy link</button>
-              <a class="btn btn-secondary btn-small" href="https://wa.me/?text=${encodeURIComponent(message)}" target="_blank" rel="noopener">Send by WhatsApp</a>
-              <button class="btn btn-secondary btn-small" type="button" data-cancel="${escapeHtml(inv.codigo)}">Cancel</button>
-            </div>`}
+        <span class="invite-link">${escapeHtml(link)}</span>
+        <div class="invite-actions">
+          <button class="btn btn-small" type="button" data-copy="${escapeHtml(link)}">Copy link</button>
+          <a class="btn btn-secondary btn-small" href="https://wa.me/?text=${encodeURIComponent(message)}" target="_blank" rel="noopener">Send by WhatsApp</a>
+          <button class="btn btn-secondary btn-small" type="button" data-cancel="${escapeHtml(inv.codigo)}">Cancel</button>
+        </div>
       </div>`;
     }).join('');
   }
@@ -870,49 +838,18 @@
   $('students-rows').addEventListener('click', async (e) => {
     const button = e.target.closest('[data-delete-student]');
     if (!button || !armed(button, 'Tap again to delete')) return;
-    const code = button.dataset.deleteStudent;
-    const photos = state.attendance.filter((a) => a.estudiante_codigo === code).map((a) => a.foto_path);
     button.disabled = true;
-    const { error } = await db.rpc('admin_eliminar_estudiante', { p_codigo: code });
+    const { error } = await db.rpc('admin_eliminar_estudiante', { p_codigo: button.dataset.deleteStudent });
     if (error) {
       button.disabled = false;
       return setAlert('dash-error', friendlyError(error));
-    }
-    if (photos.length) {
-      const removed = await db.storage.from('evidencias').remove(photos);
-      if (removed.error) console.error(removed.error);
     }
     setAlert('dash-error', '');
     loadData();
   });
 
-  // ---------------------------------------------------------------- lightbox
-  $('students-rows').addEventListener('click', async (e) => {
-    const button = e.target.closest('button.thumb');
-    if (!button) return;
-    const path = button.dataset.path;
-    const record = state.attendance.find((a) => a.foto_path === path);
-    const student = state.students.find((s) => s.codigo === record.estudiante_codigo);
-    const activity = activityById(record.actividad_id);
-    await loadPhotoUrls([path]);
-    $('lightbox-img').src = state.photoUrls.get(path) || '';
-    $('lightbox-img').alt = `Photo of ${student.nombre}`;
-    $('lightbox-caption').textContent =
-      `${student.nombre} (${student.codigo}) · ${activity ? activity.nombre : ''} · ${formatDate(record.registrado_en)}, ${formatTime(record.registrado_en)}`;
-    $('lightbox').hidden = false;
-    $('lightbox-close').focus();
-  });
-
-  function closeLightbox() {
-    $('lightbox').hidden = true;
-    $('lightbox-img').removeAttribute('src');
-  }
-  $('lightbox-close').addEventListener('click', closeLightbox);
-  $('lightbox').addEventListener('click', (e) => { if (e.target.id === 'lightbox') closeLightbox(); });
   document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    if (!$('lightbox').hidden) closeLightbox();
-    else if (!$('teacher-modal').hidden) closeTeacherModal();
+    if (e.key === 'Escape' && !$('teacher-modal').hidden) closeTeacherModal();
   });
 
   // ---------------------------------------------------------------- PDF report
@@ -924,7 +861,6 @@
   };
   // Letter, landscape: one column per teacher.
   const PAGE = { w: 792, h: 612, m: 36, top: 88, bottom: 52 };
-  const THUMB = 34;
 
   function loadScript(src) {
     return new Promise((resolve, reject) => {
@@ -948,57 +884,6 @@
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
-  }
-
-  function blobToImage(blob) {
-    return new Promise((resolve, reject) => {
-      const url = URL.createObjectURL(blob);
-      const img = new Image();
-      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
-      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image_load_failed')); };
-      img.src = url;
-    });
-  }
-
-  // Square, small JPEG so the PDF stays light.
-  async function thumbnail(url, size = 100) {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`photo ${response.status}`);
-    const img = await blobToImage(await response.blob());
-    const side = Math.min(img.naturalWidth, img.naturalHeight);
-    const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
-    canvas.getContext('2d').drawImage(img,
-      (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, size, size);
-    return canvas.toDataURL('image/jpeg', 0.75);
-  }
-
-  async function makeThumbnails(records, onProgress) {
-    const urls = new Map();
-    const paths = [...new Set(records.map((r) => r.foto_path))];
-    for (let i = 0; i < paths.length; i += 200) {
-      const { data, error } = await db.storage.from('evidencias').createSignedUrls(paths.slice(i, i + 200), 600);
-      if (error) throw error;
-      data.forEach((d) => { if (d.signedUrl) urls.set(d.path, d.signedUrl); });
-    }
-
-    const thumbs = new Map();
-    const queue = [...paths];
-    let done = 0;
-    async function worker() {
-      while (queue.length) {
-        const path = queue.shift();
-        try {
-          if (urls.has(path)) thumbs.set(path, await thumbnail(urls.get(path)));
-        } catch (err) {
-          console.error(err);
-        }
-        onProgress(++done, paths.length);
-      }
-    }
-    await Promise.all(Array.from({ length: 6 }, worker));
-    return thumbs;
   }
 
   // The built-in PDF fonts only cover Western European characters.
@@ -1094,8 +979,8 @@
     return y + 66;
   }
 
-  // One row per student; one column per teacher with the photo, activity and time.
-  function progressTable(doc, y, v, thumbs) {
+  // One row per student; one column per teacher with the activity and time.
+  function progressTable(doc, y, v) {
     if (!v.students.length) return emptyNote(doc, y, 'No students in this list yet.');
     const { showTeacher, showGroup } = extraColumns(v);
     const columns = [{ head: '#', kind: 'num', value: (s, i) => String(i + 1) }];
@@ -1129,10 +1014,6 @@
       if (c.kind === 'done') columnStyles[i] = { cellWidth: 34, halign: 'center' };
       if (c.kind === 'status') columnStyles[i] = { cellWidth: 60, halign: 'center' };
     });
-    const photoOf = (row, column) => {
-      const r = recordOf(v.students[row], column.teacher);
-      return r && thumbs && thumbs.get(r.foto_path);
-    };
 
     doc.autoTable(tableOptions({
       startY: y,
@@ -1157,22 +1038,12 @@
           const done = data.cell.raw !== 'Pending';
           data.cell.styles.textColor = done ? C.green : C.faint;
           if (column.teacher === v.focus) data.cell.styles.fillColor = C.greenSoft;
-          // Room for the photo above the text.
-          if (photoOf(data.row.index, column)) {
-            data.cell.styles.cellPadding = { top: THUMB + 8, right: 3, bottom: 4, left: 3 };
-          }
         } else if (column.kind === 'status') {
           const complete = data.cell.raw === 'Complete';
           data.cell.styles.fillColor = complete ? C.greenSoft : C.goldSoft;
           data.cell.styles.textColor = complete ? C.greenDark : C.goldText;
           data.cell.styles.fontStyle = 'bold';
         }
-      },
-      didDrawCell: (data) => {
-        const column = columns[data.column.index];
-        if (data.section !== 'body' || column.kind !== 'station') return;
-        const img = photoOf(data.row.index, column);
-        if (img) doc.addImage(img, 'JPEG', data.cell.x + (data.cell.width - THUMB) / 2, data.cell.y + 4, THUMB, THUMB);
       },
     }));
     return doc.lastAutoTable.finalY + 22;
@@ -1206,7 +1077,7 @@
     }
   }
 
-  function buildReport(doc, v, thumbs) {
+  function buildReport(doc, v) {
     const n = v.students.length;
     const details = [];
     if (v.teacher) {
@@ -1221,7 +1092,7 @@
       v.teacher ? nameOf(v.teacher) : 'All teachers', details);
     y = statBoxes(doc, y, summary(v));
     y = sectionHeading(doc, y, "Students' progress", 'For each teacher: the activity the student did and the check-in time');
-    progressTable(doc, y, v, thumbs);
+    progressTable(doc, y, v);
   }
 
   function fileSafe(text) {
@@ -1302,18 +1173,10 @@
       const logoBlob = await fetch('unisimon-logo-50-year.png').then((r) => r.blob());
       const logo = await blobToDataUrl(logoBlob);
 
-      let thumbs = null;
-      if ($('pdf-photos').checked) {
-        const records = v.students.flatMap((s) => v.columns.map((t) => recordOf(s, t))).filter(Boolean);
-        thumbs = await makeThumbnails(records, (done, total) => {
-          $('pdf-status').textContent = `Adding photos… ${done} of ${total}`;
-        });
-      }
-
       $('pdf-status').textContent = 'Creating the PDF…';
       const doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'letter', orientation: 'landscape' });
       doc.setProperties({ title: `${cfg.EVENT_TITLE} - Attendance report`, author: cfg.FOOTER });
-      buildReport(doc, v, thumbs);
+      buildReport(doc, v);
 
       const now = new Date();
       decoratePages(doc, logo, `${formatDate(now)}, ${formatTime(now)}`);
